@@ -5,7 +5,7 @@ from datetime import datetime
 
 # --- CONFIG & USERS ---
 VALID_USERS = {
-    "jason": "jason123",
+    "jason": "lab123",
     "ajin": "ajin",
     "admin": "admin"
 }
@@ -15,15 +15,15 @@ def init_db():
     conn = sqlite3.connect('lab_inventory.db')
     c = conn.cursor()
     
-    # Inventory Table (Now includes 'specs')
+    # Inventory Table 
     c.execute('''CREATE TABLE IF NOT EXISTS inventory
                  (item_code TEXT PRIMARY KEY, name TEXT, category TEXT, specs TEXT, quantity INTEGER)''')
                  
-    # Transaction Log (Now includes 'specs')
+    # Transaction Log (Now includes 'person_involved' alongside 'logged_in_account')
     c.execute('''CREATE TABLE IF NOT EXISTS transactions
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  timestamp TEXT, user TEXT, category TEXT, item_code TEXT, item_name TEXT, 
-                  specs TEXT, action TEXT, quantity INTEGER, project TEXT)''')
+                  timestamp TEXT, logged_in_account TEXT, person_involved TEXT, category TEXT, 
+                  item_code TEXT, item_name TEXT, specs TEXT, action TEXT, quantity INTEGER, project TEXT)''')
     
     # Generate Demo Data if the database is completely empty
     c.execute("SELECT COUNT(*) FROM inventory")
@@ -43,9 +43,9 @@ def init_db():
         # Add an initial demo transaction
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         c.execute('''INSERT INTO transactions 
-                     (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (timestamp, "admin", "Electronics", "ELEC-003", "Arduino Nano", "ATmega328P, 5V, Mini-B USB", "IN", 15, "Initial Lab Setup"))
+                     (timestamp, logged_in_account, person_involved, category, item_code, item_name, specs, action, quantity, project) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (timestamp, "admin", "Admin Setup", "Electronics", "ELEC-003", "Arduino Nano", "ATmega328P, 5V, Mini-B USB", "IN", 15, "Initial Lab Setup"))
         
     conn.commit()
     conn.close()
@@ -131,7 +131,6 @@ with tab_add:
             input_code = st.text_input("Create Item Code (e.g., ELEC-05, MECH-12)").strip().upper()
             input_name = st.text_input("Component Name (e.g., Capacitor, Allen Bolt)").strip().title()
             
-            # Dynamic specifics hint based on category
             if add_category == "Electronics":
                 spec_hint = "e.g., 10uF, 50V, SMT, Through-Hole, 10k Ohm"
             else:
@@ -142,7 +141,6 @@ with tab_add:
         else:
             existing_items_df = get_data("SELECT item_code, name, specs FROM inventory WHERE category=?", (add_category,))
             if not existing_items_df.empty:
-                # Combine code, name, and specs so all 3 are searchable
                 options = [f"{row['item_code']} | {row['name']} | {row['specs']}" for _, row in existing_items_df.iterrows()]
                 selection = st.selectbox("Search by Code, Name, or Specs (Type to search):", options)
                 input_code, input_name, input_specs = None, None, None
@@ -151,11 +149,14 @@ with tab_add:
                 selection = None
                 
         add_qty = st.number_input("Quantity Purchased/Added", min_value=1, step=1)
+        
+        # New Field for the specific person involved
+        add_person = st.text_input("Name of Person Adding Item (e.g., Jason, Rajeev)")
+        
         add_project = st.text_input("Project / Reason (e.g., General Stock, GeM Order)")
         add_submit = st.form_submit_button("Add to Inventory")
         
         if add_submit:
-            # Parse variables based on mode selected
             if add_type == "Register Brand New Item":
                 final_code, final_name, final_specs = input_code, input_name, input_specs
             elif selection:
@@ -164,7 +165,9 @@ with tab_add:
             else:
                 final_code, final_name, final_specs = None, None, None
             
-            if final_code and final_name:
+            if not add_person:
+                st.error("Please enter the name of the person adding the item.")
+            elif final_code and final_name:
                 df_check = get_data("SELECT quantity FROM inventory WHERE item_code=?", (final_code,))
                 current_qty = int(df_check.iloc[0]['quantity']) if not df_check.empty else 0
                 new_qty = current_qty + add_qty
@@ -176,9 +179,9 @@ with tab_add:
                 
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 run_query('''INSERT INTO transactions 
-                             (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                          (timestamp, st.session_state.current_user, add_category, final_code, final_name, final_specs, "IN", add_qty, add_project))
+                             (timestamp, logged_in_account, person_involved, category, item_code, item_name, specs, action, quantity, project) 
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                          (timestamp, st.session_state.current_user, add_person, add_category, final_code, final_name, final_specs, "IN", add_qty, add_project))
                 
                 st.success(f"Added {add_qty} x {final_name} ({final_code}). Total: {new_qty}")
                 st.rerun()
@@ -196,17 +199,22 @@ with tab_take:
         st.warning(f"No {take_category} items currently in stock.")
     else:
         with st.form("take_form"):
-            # Combine code, name, and specs for the searchable dropdown
             take_options = [f"{row['item_code']} | {row['name']} | {row['specs']}" for _, row in available_items_df.iterrows()]
             take_selection = st.selectbox("Search by Code, Name, or Specs (Type to search):", take_options)
             
             take_qty = st.number_input("Quantity Needed", min_value=1, step=1)
+            
+            # New Field for the specific person involved
+            take_person = st.text_input("Name of Person Taking Item (e.g., Jason, Rajeev)")
+            
             take_project = st.text_input("Project Name (Required)")
             take_submit = st.form_submit_button("Check Out")
             
             if take_submit:
                 if not take_project:
                     st.error("Please specify a project.")
+                elif not take_person:
+                    st.error("Please enter the name of the person taking the item.")
                 else:
                     parts = take_selection.split(" | ")
                     take_code, take_name, take_specs = parts[0], parts[1], parts[2]
@@ -220,9 +228,9 @@ with tab_take:
                         
                         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         run_query('''INSERT INTO transactions 
-                                     (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
-                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                  (timestamp, st.session_state.current_user, take_category, take_code, take_name, take_specs, "OUT", take_qty, take_project))
+                                     (timestamp, logged_in_account, person_involved, category, item_code, item_name, specs, action, quantity, project) 
+                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                  (timestamp, st.session_state.current_user, take_person, take_category, take_code, take_name, take_specs, "OUT", take_qty, take_project))
                         
                         st.success(f"Checked out {take_qty} x {take_name}. Remaining: {new_qty}")
                         st.rerun()
@@ -232,7 +240,7 @@ with tab_take:
 # 4. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
-    df_history = get_data('''SELECT timestamp as 'Time', user as 'User', 
+    df_history = get_data('''SELECT timestamp as 'Time', logged_in_account as 'Website Login', person_involved as 'Person', 
                              category as 'Type', item_code as 'Code', item_name as 'Component', 
                              specs as 'Specifications', action as 'IN/OUT', 
                              quantity as 'Qty', project as 'Project' 
