@@ -96,8 +96,9 @@ if st.button("Logout"):
 
 st.divider()
 
-tab_stock, tab_add, tab_take, tab_edit, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "📜 History Log"
+# Added tab_find to the list
+tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_history = st.tabs([
+    "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find Item", "📜 History Log"
 ])
 
 # 1. VIEW STOCK TAB
@@ -175,7 +176,6 @@ with tab_add:
                 parts = selection.split(" | ")
                 final_code = parts[0]
                 
-                # Fetch existing details from DB for the log
                 existing_item = get_data("SELECT name, specs, room_no, room_name, rack_no FROM inventory WHERE item_code=?", (final_code,)).iloc[0]
                 final_name, final_specs = existing_item['name'], existing_item['specs']
                 final_r_no, final_r_name, final_rack = existing_item['room_no'], existing_item['room_name'], existing_item['rack_no']
@@ -187,7 +187,6 @@ with tab_add:
                 current_qty = int(df_check.iloc[0]['quantity']) if not df_check.empty else 0
                 new_qty = current_qty + add_qty
                 
-                # Insert or Update Quantity (Location stays the same on conflict)
                 run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity) 
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
                              ON CONFLICT(item_code) DO UPDATE SET quantity=?''', 
@@ -215,7 +214,6 @@ with tab_take:
         st.warning(f"No {take_category} items currently in stock.")
     else:
         with st.form("take_form", clear_on_submit=True):
-            # Added location hints to the dropdown so you know where to grab it
             take_options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_name']} ({row['rack_no']})" for _, row in available_items_df.iterrows()]
             take_selection = st.selectbox("Search by Code, Name, or Location:", take_options)
             
@@ -229,7 +227,6 @@ with tab_take:
                 else:
                     take_code = take_selection.split(" | ")[0]
                     
-                    # Fetch details directly from DB to ensure accuracy
                     item_details = get_data("SELECT name, specs, quantity FROM inventory WHERE item_code=?", (take_code,)).iloc[0]
                     take_name = item_details['name']
                     take_specs = item_details['specs']
@@ -291,7 +288,29 @@ with tab_edit:
                     st.success(f"Successfully updated {current_code}!")
                     st.rerun()
 
-# 5. HISTORY LOG TAB
+# 5. FIND ITEM TAB
+with tab_find:
+    st.subheader("🔍 Find Component Location")
+    search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
+    
+    if search_query:
+        # Uses SQL LIKE to match any part of the text, ignoring capitalization
+        query_param = f"%{search_query}%"
+        results_df = get_data('''SELECT item_code as 'Code', name as 'Component', 
+                                 category as 'Category', specs as 'Specifications', 
+                                 room_name || ' (' || room_no || ')' as 'Room', 
+                                 rack_no as 'Rack', quantity as 'Qty' 
+                                 FROM inventory 
+                                 WHERE name LIKE ? OR item_code LIKE ? OR specs LIKE ?''', 
+                              (query_param, query_param, query_param))
+        
+        if not results_df.empty:
+            st.success(f"Found {len(results_df)} matching item(s):")
+            st.dataframe(results_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("No items found matching your search.")
+
+# 6. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
     df_history = get_data('''SELECT 
