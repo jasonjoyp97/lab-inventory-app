@@ -1,38 +1,38 @@
 import streamlit as st
- import pandas as pd
- from datetime import datetime
+import pandas as pd
+from datetime import datetime
 
- # --- MOCK BROWSER DATABASE SETUP ---
+# --- MOCK BROWSER DATABASE SETUP ---
 # Since browsers can't create real SQLite files, we use session_state for the Playground
 if 'inventory' not in st.session_state:
     st.session_state.inventory = pd.DataFrame([
-         {"Component": "Arduino Nano", "Category": "Electronics", "Qty": 5},
-         {"Component": "M4 Bolt", "Category": "Mechanical", "Qty": 100}
-     ])
- if 'transactions' not in st.session_state:
-     st.session_state.transactions = pd.DataFrame(columns=['Time', 'User', 'Category', 'Component', 'Action', 'Qty', 'Project'])
- 
- VALID_USERS = {"jason": "lab123", "rajeev": "lab123", "admin": "admin"}
- 
- st.set_page_config(page_title="Lab Inventory", layout="wide")
- 
- # --- LOGIN SYSTEM ---
- if "current_user" not in st.session_state:
-     st.session_state.current_user = None
- 
- if not st.session_state.current_user:
-     st.title("🔒 Lab Inventory Login")
-     with st.form("login_form"):
-         username = st.text_input("Username").lower().strip()
-         password = st.text_input("Password", type="password")
-         submitted = st.form_submit_button("Login")
-         
-         if submitted:
-             if username in VALID_USERS and VALID_USERS[username] == password:
-                 st.session_state.current_user = username
-                 st.rerun()
-             else:
-                 st.error("Invalid username or password. Try jason / lab123")
+        {"Component": "Arduino Nano", "Category": "Electronics", "Qty": 5},
+        {"Component": "M4 Bolt", "Category": "Mechanical", "Qty": 100}
+    ])
+if 'transactions' not in st.session_state:
+    st.session_state.transactions = pd.DataFrame(columns=['Time', 'User', 'Category', 'Component', 'Action', 'Qty', 'Project'])
+
+VALID_USERS = {"jason": "lab123", "rajeev": "lab123", "admin": "admin"}
+
+st.set_page_config(page_title="Lab Inventory", layout="wide")
+
+# --- LOGIN SYSTEM ---
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+
+if not st.session_state.current_user:
+    st.title("🔒 Lab Inventory Login")
+    with st.form("login_form"):
+        username = st.text_input("Username").lower().strip()
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+        
+        if submitted:
+            if username in VALID_USERS and VALID_USERS[username] == password:
+                st.session_state.current_user = username
+                st.rerun()
+            else:
+                st.error("Invalid username or password. Try jason / lab123")
     st.stop()
 
 # --- MAIN DASHBOARD ---
@@ -125,3 +125,4 @@ with tab_take:
 # 4. HISTORY
 with tab_history:
     st.subheader("Lab Activity Log")
+    st.dataframe(st.session_state.transactions, use_container_width=True, hide_index=True)
