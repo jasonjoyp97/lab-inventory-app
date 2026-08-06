@@ -95,8 +95,9 @@ if st.button("Logout"):
 
 st.divider()
 
-tab_stock, tab_add, tab_take, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "📜 History Log"
+# Added the new "Edit Items" tab here
+tab_stock, tab_add, tab_take, tab_edit, tab_history = st.tabs([
+    "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "📜 History Log"
 ])
 
 # 1. VIEW STOCK TAB
@@ -126,7 +127,8 @@ with tab_add:
     add_type = st.radio("What are you adding?", ["Restock Existing Item", "Register Brand New Item"], horizontal=True)
     add_category = st.selectbox("Component Category:", ["Electronics", "Mechanical"], key="add_cat")
     
-    with st.form("add_form"):
+    # clear_on_submit=True resets the form completely after a successful click
+    with st.form("add_form", clear_on_submit=True):
         if add_type == "Register Brand New Item":
             input_code = st.text_input("Create Item Code (e.g., ELEC-05, MECH-12)").strip().upper()
             input_name = st.text_input("Component Name (e.g., Capacitor, Allen Bolt)").strip().title()
@@ -171,7 +173,6 @@ with tab_add:
                              ON CONFLICT(item_code) DO UPDATE SET quantity=?''', 
                           (final_code, final_name, add_category, final_specs, new_qty, new_qty))
                 
-                # Automatically uses st.session_state.current_user here
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 run_query('''INSERT INTO transactions 
                              (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
@@ -193,7 +194,7 @@ with tab_take:
     if available_items_df.empty:
         st.warning(f"No {take_category} items currently in stock.")
     else:
-        with st.form("take_form"):
+        with st.form("take_form", clear_on_submit=True):
             take_options = [f"{row['item_code']} | {row['name']} | {row['specs']}" for _, row in available_items_df.iterrows()]
             take_selection = st.selectbox("Search by Code, Name, or Specs (Type to search):", take_options)
             
@@ -215,7 +216,6 @@ with tab_take:
                         new_qty = current_qty - take_qty
                         run_query("UPDATE inventory SET quantity=? WHERE item_code=?", (new_qty, take_code))
                         
-                        # Automatically uses st.session_state.current_user here
                         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         run_query('''INSERT INTO transactions 
                                      (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
@@ -227,7 +227,42 @@ with tab_take:
                     else:
                         st.error(f"Not enough stock! Only {current_qty} available.")
 
-# 4. HISTORY LOG TAB
+# 4. EDIT ITEMS TAB
+with tab_edit:
+    st.subheader("Edit Item Details")
+    edit_category = st.radio("Select Category:", ["Electronics", "Mechanical"], key="edit_cat", horizontal=True)
+    
+    existing_items_df = get_data("SELECT item_code, name, specs FROM inventory WHERE category=?", (edit_category,))
+    
+    if existing_items_df.empty:
+        st.warning(f"No {edit_category} items exist yet.")
+    else:
+        # Dropdown placed outside the form so it updates the text boxes instantly when changed
+        edit_options = [f"{row['item_code']} | {row['name']} | {row['specs']}" for _, row in existing_items_df.iterrows()]
+        edit_selection = st.selectbox("Select Item to Edit:", edit_options)
+        
+        current_code, current_name, current_specs = edit_selection.split(" | ")
+        
+        with st.form("edit_form", clear_on_submit=True):
+            new_name = st.text_input("Component Name", value=current_name).strip().title()
+            new_specs = st.text_input("Specifications", value=current_specs).strip()
+            
+            submit_edit = st.form_submit_button("Update Item Details")
+            
+            if submit_edit:
+                if not new_name or not new_specs:
+                    st.error("Name and Specifications cannot be empty.")
+                else:
+                    # Updates the main inventory
+                    run_query("UPDATE inventory SET name=?, specs=? WHERE item_code=?", (new_name, new_specs, current_code))
+                    
+                    # Updates past history logs so the old typos don't stick around in the History Tab
+                    run_query("UPDATE transactions SET item_name=?, specs=? WHERE item_code=?", (new_name, new_specs, current_code))
+                    
+                    st.success(f"Successfully updated {current_code}!")
+                    st.rerun()
+
+# 5. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
     df_history = get_data('''SELECT timestamp as 'Time', user as 'User', 
