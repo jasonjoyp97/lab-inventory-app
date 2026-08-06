@@ -95,7 +95,6 @@ if st.button("Logout"):
 
 st.divider()
 
-# Added the new "Edit Items" tab here
 tab_stock, tab_add, tab_take, tab_edit, tab_history = st.tabs([
     "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "📜 History Log"
 ])
@@ -127,7 +126,6 @@ with tab_add:
     add_type = st.radio("What are you adding?", ["Restock Existing Item", "Register Brand New Item"], horizontal=True)
     add_category = st.selectbox("Component Category:", ["Electronics", "Mechanical"], key="add_cat")
     
-    # clear_on_submit=True resets the form completely after a successful click
     with st.form("add_form", clear_on_submit=True):
         if add_type == "Register Brand New Item":
             input_code = st.text_input("Create Item Code (e.g., ELEC-05, MECH-12)").strip().upper()
@@ -237,7 +235,6 @@ with tab_edit:
     if existing_items_df.empty:
         st.warning(f"No {edit_category} items exist yet.")
     else:
-        # Dropdown placed outside the form so it updates the text boxes instantly when changed
         edit_options = [f"{row['item_code']} | {row['name']} | {row['specs']}" for _, row in existing_items_df.iterrows()]
         edit_selection = st.selectbox("Select Item to Edit:", edit_options)
         
@@ -253,10 +250,7 @@ with tab_edit:
                 if not new_name or not new_specs:
                     st.error("Name and Specifications cannot be empty.")
                 else:
-                    # Updates the main inventory
                     run_query("UPDATE inventory SET name=?, specs=? WHERE item_code=?", (new_name, new_specs, current_code))
-                    
-                    # Updates past history logs so the old typos don't stick around in the History Tab
                     run_query("UPDATE transactions SET item_name=?, specs=? WHERE item_code=?", (new_name, new_specs, current_code))
                     
                     st.success(f"Successfully updated {current_code}!")
@@ -265,7 +259,10 @@ with tab_edit:
 # 5. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
-    df_history = get_data('''SELECT timestamp as 'Time', user as 'User', 
+    df_history = get_data('''SELECT 
+                             DATE(timestamp) as 'Date',
+                             TIME(timestamp) as 'Time',
+                             user as 'User', 
                              category as 'Type', item_code as 'Code', item_name as 'Component', 
                              specs as 'Specifications', action as 'IN/OUT', 
                              quantity as 'Qty', project as 'Project' 
