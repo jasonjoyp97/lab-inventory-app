@@ -1,7 +1,11 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# --- TIMEZONE SETUP ---
+# Create a permanent IST timezone (+5 hours 30 mins)
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # --- CONFIG & USERS ---
 VALID_USERS = {
@@ -15,7 +19,7 @@ def init_db():
     conn = sqlite3.connect('lab_inventory.db')
     c = conn.cursor()
     
-    # Inventory Table (Now includes Room and Rack details)
+    # Inventory Table 
     c.execute('''CREATE TABLE IF NOT EXISTS inventory
                  (item_code TEXT PRIMARY KEY, name TEXT, category TEXT, specs TEXT, 
                   room_no TEXT, room_name TEXT, rack_no TEXT, quantity INTEGER)''')
@@ -41,8 +45,8 @@ def init_db():
         ]
         c.executemany("INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?, ?, ?)", demo_items)
         
-        # Add an initial demo transaction
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Add an initial demo transaction with IST time
+        timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
         c.execute('''INSERT INTO transactions 
                      (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -96,7 +100,6 @@ if st.button("Logout"):
 
 st.divider()
 
-# Added tab_find to the list
 tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_history = st.tabs([
     "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find Item", "📜 History Log"
 ])
@@ -192,7 +195,8 @@ with tab_add:
                              ON CONFLICT(item_code) DO UPDATE SET quantity=?''', 
                           (final_code, final_name, add_category, final_specs, final_r_no, final_r_name, final_rack, new_qty, new_qty))
                 
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                # Fetching time in IST
+                timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                 run_query('''INSERT INTO transactions 
                              (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -236,7 +240,8 @@ with tab_take:
                         new_qty = current_qty - take_qty
                         run_query("UPDATE inventory SET quantity=? WHERE item_code=?", (new_qty, take_code))
                         
-                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        # Fetching time in IST
+                        timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                         run_query('''INSERT INTO transactions 
                                      (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
                                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -294,7 +299,6 @@ with tab_find:
     search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
     
     if search_query:
-        # Uses SQL LIKE to match any part of the text, ignoring capitalization
         query_param = f"%{search_query}%"
         results_df = get_data('''SELECT item_code as 'Code', name as 'Component', 
                                  category as 'Category', specs as 'Specifications', 
@@ -315,7 +319,7 @@ with tab_history:
     st.subheader("Lab Activity Log")
     df_history = get_data('''SELECT 
                              DATE(timestamp) as 'Date',
-                             TIME(timestamp) as 'Time',
+                             TIME(timestamp) as 'Time (IST)',
                              user as 'User', 
                              category as 'Type', item_code as 'Code', item_name as 'Component', 
                              specs as 'Specifications', action as 'IN/OUT', 
