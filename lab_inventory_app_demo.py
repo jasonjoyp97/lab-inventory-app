@@ -24,10 +24,10 @@ def init_db():
     conn = sqlite3.connect('lab_inventory.db')
     c = conn.cursor()
     
-    # Inventory Table 
+    # Inventory Table (Now includes low_stock_threshold)
     c.execute('''CREATE TABLE IF NOT EXISTS inventory
                  (item_code TEXT PRIMARY KEY, name TEXT, category TEXT, specs TEXT, 
-                  room_no TEXT, room_name TEXT, rack_no TEXT, quantity INTEGER)''')
+                  room_no TEXT, room_name TEXT, rack_no TEXT, quantity INTEGER, low_stock_threshold INTEGER)''')
                  
     # Transaction Log 
     c.execute('''CREATE TABLE IF NOT EXISTS transactions
@@ -39,16 +39,16 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM inventory")
     if c.fetchone()[0] == 0:
         demo_items = [
-            ("ELEC-001", "Resistor", "Electronics", "10k Ohm, 0.25W, Through-Hole", "101", "Prototyping Lab", "A-1", 500),
-            ("ELEC-002", "Capacitor", "Electronics", "10uF, 50V, Electrolytic", "101", "Prototyping Lab", "A-2", 200),
-            ("ELEC-003", "Arduino Nano", "Electronics", "ATmega328P, 5V, Mini-B USB", "102", "Embedded Systems", "B-1", 15),
-            ("ELEC-004", "LED Display", "Electronics", "16x2 Character, Blue Backlight", "102", "Embedded Systems", "B-2", 10),
-            ("MECH-001", "Hex Nut", "Mechanical", "M3, Stainless Steel 304", "201", "Machine Shop", "Rack 1", 1000),
-            ("MECH-002", "Allen Bolt", "Mechanical", "M4 x 12mm, Carbon Steel", "201", "Machine Shop", "Rack 1", 500),
-            ("MECH-003", "Wooden Nail", "Mechanical", "2 inch, Galvanized", "205", "General Storage", "Shelf C", 400),
-            ("MECH-004", "Clamp", "Mechanical", "C-Clamp, 2 inch opening", "201", "Machine Shop", "Tool Wall", 20)
+            ("ELEC-001", "Resistor", "Electronics", "10k Ohm, 0.25W, Through-Hole", "101", "Prototyping Lab", "A-1", 500, 100),
+            ("ELEC-002", "Capacitor", "Electronics", "10uF, 50V, Electrolytic", "101", "Prototyping Lab", "A-2", 200, 50),
+            ("ELEC-003", "Arduino Nano", "Electronics", "ATmega328P, 5V, Mini-B USB", "102", "Embedded Systems", "B-1", 15, 10),
+            ("ELEC-004", "LED Display", "Electronics", "16x2 Character, Blue Backlight", "102", "Embedded Systems", "B-2", 10, 5),
+            ("MECH-001", "Hex Nut", "Mechanical", "M3, Stainless Steel 304", "201", "Machine Shop", "Rack 1", 1000, 200),
+            ("MECH-002", "Allen Bolt", "Mechanical", "M4 x 12mm, Carbon Steel", "201", "Machine Shop", "Rack 1", 500, 100),
+            ("MECH-003", "Wooden Nail", "Mechanical", "2 inch, Galvanized", "205", "General Storage", "Shelf C", 400, 100),
+            ("MECH-004", "Clamp", "Mechanical", "C-Clamp, 2 inch opening", "201", "Machine Shop", "Tool Wall", 20, 5)
         ]
-        c.executemany("INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?, ?, ?)", demo_items)
+        c.executemany("INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", demo_items)
         
         # Add an initial demo transaction with IST time
         timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
@@ -105,8 +105,9 @@ if st.button("Logout"):
 
 st.divider()
 
-tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find Item", "🖨️ Print Labels", "📜 History Log"
+# Added the warning tab
+tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_warning, tab_history = st.tabs([
+    "📦 View Stock", "📥 Add Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📜 History"
 ])
 
 # 1. VIEW STOCK TAB
@@ -114,7 +115,7 @@ with tab_stock:
     st.subheader("⚡ Electronics")
     df_elec = get_data('''SELECT item_code as 'Code', name as 'Component', specs as 'Specifications', 
                           room_name || ' (' || room_no || ')' as 'Room', rack_no as 'Rack', 
-                          quantity as 'Qty' FROM inventory WHERE category='Electronics' ''')
+                          quantity as 'Qty', low_stock_threshold as 'Warning Lvl' FROM inventory WHERE category='Electronics' ''')
     if not df_elec.empty:
         st.dataframe(df_elec, use_container_width=True, hide_index=True)
     else:
@@ -125,7 +126,7 @@ with tab_stock:
     st.subheader("⚙️ Mechanical")
     df_mech = get_data('''SELECT item_code as 'Code', name as 'Component', specs as 'Specifications', 
                           room_name || ' (' || room_no || ')' as 'Room', rack_no as 'Rack', 
-                          quantity as 'Qty' FROM inventory WHERE category='Mechanical' ''')
+                          quantity as 'Qty', low_stock_threshold as 'Warning Lvl' FROM inventory WHERE category='Mechanical' ''')
     if not df_mech.empty:
         st.dataframe(df_mech, use_container_width=True, hide_index=True)
     else:
@@ -150,6 +151,7 @@ with tab_add:
                 else:
                     spec_hint = "e.g., M4 x 10mm, Stainless Steel"
                 input_specs = st.text_input(f"Specifications ({spec_hint})").strip()
+                input_threshold = st.number_input("Low Stock Warning Level", min_value=1, step=1, value=10)
             
             st.write("📍 Location Details")
             loc1, loc2, loc3 = st.columns(3)
@@ -162,12 +164,12 @@ with tab_add:
                 
             selection = None
         else:
-            existing_items_df = get_data("SELECT item_code, name, specs, room_no, rack_no FROM inventory WHERE category=?", (add_category,))
+            existing_items_df = get_data("SELECT item_code, name, specs, room_no, rack_no, low_stock_threshold FROM inventory WHERE category=?", (add_category,))
             if not existing_items_df.empty:
                 options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_no']} (Rack: {row['rack_no']})" for _, row in existing_items_df.iterrows()]
                 selection = st.selectbox("Search by Code or Name (Type to search/scan):", options)
                 input_code, input_name, input_specs = None, None, None
-                input_room_no, input_room_name, input_rack_no = None, None, None
+                input_room_no, input_room_name, input_rack_no, input_threshold = None, None, None, None
             else:
                 st.warning(f"No {add_category} items exist yet. Please register a new item.")
                 selection = None
@@ -180,13 +182,15 @@ with tab_add:
             if add_type == "Register Brand New Item":
                 final_code, final_name, final_specs = input_code, input_name, input_specs
                 final_r_no, final_r_name, final_rack = input_room_no, input_room_name, input_rack_no
+                final_threshold = input_threshold
             elif selection:
                 parts = selection.split(" | ")
                 final_code = parts[0]
                 
-                existing_item = get_data("SELECT name, specs, room_no, room_name, rack_no FROM inventory WHERE item_code=?", (final_code,)).iloc[0]
+                existing_item = get_data("SELECT name, specs, room_no, room_name, rack_no, low_stock_threshold FROM inventory WHERE item_code=?", (final_code,)).iloc[0]
                 final_name, final_specs = existing_item['name'], existing_item['specs']
                 final_r_no, final_r_name, final_rack = existing_item['room_no'], existing_item['room_name'], existing_item['rack_no']
+                final_threshold = existing_item['low_stock_threshold']
             else:
                 final_code, final_name, final_specs = None, None, None
             
@@ -195,10 +199,10 @@ with tab_add:
                 current_qty = int(df_check.iloc[0]['quantity']) if not df_check.empty else 0
                 new_qty = current_qty + add_qty
                 
-                run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
+                run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity, low_stock_threshold) 
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
                              ON CONFLICT(item_code) DO UPDATE SET quantity=?''', 
-                          (final_code, final_name, add_category, final_specs, final_r_no, final_r_name, final_rack, new_qty, new_qty))
+                          (final_code, final_name, add_category, final_specs, final_r_no, final_r_name, final_rack, new_qty, final_threshold, new_qty))
                 
                 timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                 run_query('''INSERT INTO transactions 
@@ -260,7 +264,7 @@ with tab_edit:
     st.subheader("Edit Item Details & Location")
     edit_category = st.radio("Select Category:", ["Electronics", "Mechanical"], key="edit_cat", horizontal=True)
     
-    existing_items_df = get_data("SELECT item_code, name, specs, room_no, room_name, rack_no FROM inventory WHERE category=?", (edit_category,))
+    existing_items_df = get_data("SELECT item_code, name, specs, room_no, room_name, rack_no, low_stock_threshold FROM inventory WHERE category=?", (edit_category,))
     
     if existing_items_df.empty:
         st.warning(f"No {edit_category} items exist yet.")
@@ -276,6 +280,7 @@ with tab_edit:
             with col1:
                 new_name = st.text_input("Component Name", value=current_data['name']).strip().title()
                 new_specs = st.text_input("Specifications", value=current_data['specs']).strip()
+                new_threshold = st.number_input("Low Stock Warning Level", value=int(current_data['low_stock_threshold']), min_value=1, step=1)
             with col2:
                 new_room_no = st.text_input("Room Number", value=current_data['room_no']).strip()
                 new_room_name = st.text_input("Room Name", value=current_data['room_name']).strip().title()
@@ -288,9 +293,9 @@ with tab_edit:
                     st.error("Name cannot be empty.")
                 else:
                     run_query('''UPDATE inventory 
-                                 SET name=?, specs=?, room_no=?, room_name=?, rack_no=? 
+                                 SET name=?, specs=?, room_no=?, room_name=?, rack_no=?, low_stock_threshold=? 
                                  WHERE item_code=?''', 
-                              (new_name, new_specs, new_room_no, new_room_name, new_rack_no, current_code))
+                              (new_name, new_specs, new_room_no, new_room_name, new_rack_no, new_threshold, current_code))
                     run_query("UPDATE transactions SET item_name=?, specs=? WHERE item_code=?", (new_name, new_specs, current_code))
                     
                     st.success(f"Successfully updated {current_code}!")
@@ -333,7 +338,6 @@ with tab_qr:
         if st.button("Generate QR Code"):
             qr_code_text = qr_selection.split(" | ")[0]
             
-            # Fetch the specific row details
             item_data = all_items_df[all_items_df['item_code'] == qr_code_text].iloc[0]
             qr_item_name = item_data['name']
             qr_item_specs = item_data['specs']
@@ -341,23 +345,19 @@ with tab_qr:
             
             detailed_qr_data = f"Code: {qr_code_text}\nItem: {qr_item_name}\nSpecs: {qr_item_specs}"
             
-            # 1. Generate the base QR Code image
             qr = qrcode.QRCode(version=1, box_size=10, border=4)
             qr.add_data(detailed_qr_data)
             qr.make(fit=True)
             
-            # Convert to RGB so we can draw clear text on it
             qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
             qr_w, qr_h = qr_img.size
             
-            # 2. Create a larger white canvas with extra height at the top for the text
             text_margin = 100 
             label_img = Image.new('RGB', (qr_w, qr_h + text_margin), 'white')
             label_img.paste(qr_img, (0, text_margin))
             
             draw = ImageDraw.Draw(label_img)
             
-            # 3. Bulletproof Font Download: Grab OpenSans-Bold dynamically if it isn't saved yet
             font_path = "OpenSans-Bold.ttf"
             if not os.path.exists(font_path):
                 try:
@@ -365,30 +365,25 @@ with tab_qr:
                 except Exception:
                     pass
             
-            # Load the big, bold font (size 50 for max visibility)
             try:
                 font = ImageFont.truetype(font_path, 50)
             except IOError:
-                font = ImageFont.load_default() # Absolute fallback just in case
+                font = ImageFont.load_default() 
             
             label_text = f"RACK: {qr_rack_no}"
             
-            # Calculate text size to center it perfectly
             try:
                 left, top, right, bottom = draw.textbbox((0, 0), label_text, font=font)
                 text_w = right - left
                 text_h = bottom - top
             except AttributeError:
-                # Fallback for older Pillow versions
                 text_w, text_h = draw.textsize(label_text, font=font)
                 
             x_pos = (qr_w - text_w) // 2
             y_pos = 20
             
-            # 4. Draw the text (Underline code removed)
             draw.text((x_pos, y_pos), label_text, font=font, fill="black")
             
-            # 5. Save to buffer for Streamlit to render
             buf = io.BytesIO()
             label_img.save(buf, format="PNG")
             
@@ -404,7 +399,34 @@ with tab_qr:
                     mime="image/png"
                 )
 
-# 7. HISTORY LOG TAB
+# 7. LOW STOCK WARNING TAB
+with tab_warning:
+    st.subheader("⚠️ Low Stock Alerts")
+    st.write("Components that have dropped to or below their warning threshold.")
+    
+    # Query items where current quantity is less than or equal to the threshold
+    df_warning = get_data('''SELECT item_code as 'Code', name as 'Component', category as 'Category', 
+                             quantity as 'Current Qty', low_stock_threshold as 'Warning Level', 
+                             room_name || ' (' || rack_no || ')' as 'Location' 
+                             FROM inventory WHERE quantity <= low_stock_threshold ORDER BY category, name''')
+    
+    if not df_warning.empty:
+        st.error(f"Attention: {len(df_warning)} item(s) are running low and need to be reordered.")
+        st.dataframe(df_warning, use_container_width=True, hide_index=True)
+        
+        # Create CSV for purchasing
+        csv_data = df_warning.to_csv(index=False).encode('utf-8')
+        
+        st.download_button(
+            label="📄 Download Reorder List (CSV)",
+            data=csv_data,
+            file_name=f"Low_Stock_Reorder_List_{datetime.now(IST).strftime('%Y-%m-%d')}.csv",
+            mime="text/csv",
+        )
+    else:
+        st.success("✅ All items are sufficiently stocked! No warnings to display.")
+
+# 8. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
     df_history = get_data('''SELECT 
