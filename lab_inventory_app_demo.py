@@ -385,11 +385,8 @@ with tab_qr:
             x_pos = (qr_w - text_w) // 2
             y_pos = 20
             
-            # 4. Draw the text and a thick underline
+            # 4. Draw the text (Underline code removed)
             draw.text((x_pos, y_pos), label_text, font=font, fill="black")
-            
-            line_y = y_pos + text_h + 10
-            draw.line([(x_pos, line_y), (x_pos + text_w, line_y)], fill="black", width=4)
             
             # 5. Save to buffer for Streamlit to render
             buf = io.BytesIO()
