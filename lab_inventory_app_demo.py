@@ -24,7 +24,7 @@ def init_db():
     conn = sqlite3.connect('lab_inventory.db')
     c = conn.cursor()
     
-    # Inventory Table (Now includes 'image BLOB' for storing pictures)
+    # Inventory Table 
     c.execute('''CREATE TABLE IF NOT EXISTS inventory
                  (item_code TEXT PRIMARY KEY, name TEXT, category TEXT, specs TEXT, 
                   room_no TEXT, room_name TEXT, rack_no TEXT, quantity INTEGER, 
@@ -40,8 +40,8 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM inventory")
     if c.fetchone()[0] == 0:
         demo_items = [
-            ("ELEC-001", "Resistor", "Electronics", "10k Ohm, 0.25W, Through-Hole", "101", "Prototyping Lab", "A-1", 500, 100, None),
-            ("ELEC-002", "Capacitor", "Electronics", "10uF, 50V, Electrolytic", "101", "Prototyping Lab", "A-2", 200, 50, None),
+            ("ELEC-001", "Resistor", "Electronics", "10k Ohm, 0.25W [Through-Hole]", "101", "Prototyping Lab", "A-1", 500, 100, None),
+            ("ELEC-002", "Capacitor", "Electronics", "10uF, 50V, Electrolytic [SMT]", "101", "Prototyping Lab", "A-2", 200, 50, None),
             ("ELEC-003", "Arduino Nano", "Electronics", "ATmega328P, 5V, Mini-B USB", "102", "Embedded Systems", "B-1", 15, 10, None),
             ("ELEC-004", "LED Display", "Electronics", "16x2 Character, Blue Backlight", "102", "Embedded Systems", "B-2", 10, 5, None),
             ("MECH-001", "Hex Nut", "Mechanical", "M3, Stainless Steel 304", "201", "Machine Shop", "Rack 1", 1000, 200, None),
@@ -147,11 +147,16 @@ with tab_add:
                 input_name = st.text_input("Component Name (e.g., Capacitor, Allen Bolt)").strip().title()
             with col2:
                 if add_category == "Electronics":
-                    spec_hint = "e.g., 10uF, 50V, SMT"
+                    spec_hint = "e.g., 10uF, 50V"
+                    input_specs = st.text_input(f"Specifications ({spec_hint})").strip()
+                    # Add Mounting Type option specifically for Electronics
+                    mounting_type = st.radio("Mounting Type", ["None", "SMT", "Through-Hole"], horizontal=True)
+                    input_threshold = st.number_input("Low Stock Warning Level", min_value=1, step=1, value=10)
                 else:
                     spec_hint = "e.g., M4 x 10mm, Stainless Steel"
-                input_specs = st.text_input(f"Specifications ({spec_hint})").strip()
-                input_threshold = st.number_input("Low Stock Warning Level", min_value=1, step=1, value=10)
+                    input_specs = st.text_input(f"Specifications ({spec_hint})").strip()
+                    mounting_type = "None"
+                    input_threshold = st.number_input("Low Stock Warning Level", min_value=1, step=1, value=10)
             
             st.write("📍 Location & Image Details")
             loc1, loc2, loc3 = st.columns(3)
@@ -182,10 +187,14 @@ with tab_add:
         
         if add_submit:
             if add_type == "Register Brand New Item":
-                final_code, final_name, final_specs = input_code, input_name, input_specs
+                # Automatically append the mounting type to the specs string if selected
+                final_specs = input_specs
+                if mounting_type != "None":
+                    final_specs = f"{input_specs} [{mounting_type}]" if input_specs else f"[{mounting_type}]"
+                
+                final_code, final_name = input_code, input_name
                 final_r_no, final_r_name, final_rack = input_room_no, input_room_name, input_rack_no
                 final_threshold = input_threshold
-                # Convert image to bytes for database storage
                 final_img_bytes = input_image.getvalue() if input_image is not None else None
             elif selection:
                 parts = selection.split(" | ")
@@ -230,12 +239,10 @@ with tab_take:
     if available_items_df.empty:
         st.warning(f"No {take_category} items currently in stock.")
     else:
-        # The dropdown is placed OUTSIDE the form so the image instantly updates when you select it
         take_options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_name']} ({row['rack_no']})" for _, row in available_items_df.iterrows()]
         take_selection = st.selectbox("Search by Code, Name, or Location (Type to search/scan):", take_options)
         take_code = take_selection.split(" | ")[0]
         
-        # Fetch detailed info including image to preview instantly
         preview_data = get_data("SELECT image, quantity, name, specs FROM inventory WHERE item_code=?", (take_code,)).iloc[0]
         
         col1, col2 = st.columns([1, 2])
@@ -286,7 +293,6 @@ with tab_edit:
         current_code = edit_selection.split(" | ")[0]
         current_data = existing_items_df[existing_items_df['item_code'] == current_code].iloc[0]
         
-        # Show existing picture if it has one
         if current_data['image'] is not None:
             st.image(current_data['image'], width=150, caption="Current Picture")
             
@@ -333,7 +339,6 @@ with tab_find:
     
     if search_query:
         query_param = f"%{search_query}%"
-        # Fetching image along with data
         results_df = get_data('''SELECT item_code as 'Code', name as 'Component', 
                                  category as 'Category', specs as 'Specifications', 
                                  room_name || ' (' || room_no || ')' as 'Room', 
@@ -345,7 +350,6 @@ with tab_find:
         if not results_df.empty:
             st.success(f"Found {len(results_df)} matching item(s):")
             
-            # Display results in cards to show images neatly
             for idx, row in results_df.iterrows():
                 with st.container(border=True):
                     c1, c2 = st.columns([1, 4])
