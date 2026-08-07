@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 import qrcode
 import io
+import os
+import urllib.request
 from PIL import Image, ImageDraw, ImageFont
 
 # --- TIMEZONE SETUP ---
@@ -348,24 +350,26 @@ with tab_qr:
             qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
             qr_w, qr_h = qr_img.size
             
-            # 2. Create a larger white canvas to fit both the text and the QR code
-            text_margin = 60
+            # 2. Create a larger white canvas with extra height at the top for the text
+            text_margin = 100 
             label_img = Image.new('RGB', (qr_w, qr_h + text_margin), 'white')
-            
-            # Paste the QR code onto the canvas, leaving space at the top
             label_img.paste(qr_img, (0, text_margin))
             
-            # 3. Setup Drawing tools
             draw = ImageDraw.Draw(label_img)
             
-            # Try to grab a default system bold font, fallback to standard if running on a strict cloud server
-            try:
-                font = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
-            except IOError:
+            # 3. Bulletproof Font Download: Grab OpenSans-Bold dynamically if it isn't saved yet
+            font_path = "OpenSans-Bold.ttf"
+            if not os.path.exists(font_path):
                 try:
-                    font = ImageFont.truetype("arialbd.ttf", 26)
-                except IOError:
-                    font = ImageFont.load_default()
+                    urllib.request.urlretrieve("https://github.com/googlefonts/opensans/raw/main/fonts/ttf/OpenSans-Bold.ttf", font_path)
+                except Exception:
+                    pass
+            
+            # Load the big, bold font (size 50 for max visibility)
+            try:
+                font = ImageFont.truetype(font_path, 50)
+            except IOError:
+                font = ImageFont.load_default() # Absolute fallback just in case
             
             label_text = f"RACK: {qr_rack_no}"
             
@@ -379,14 +383,13 @@ with tab_qr:
                 text_w, text_h = draw.textsize(label_text, font=font)
                 
             x_pos = (qr_w - text_w) // 2
-            y_pos = 15
+            y_pos = 20
             
-            # 4. Draw the text and the underline
+            # 4. Draw the text and a thick underline
             draw.text((x_pos, y_pos), label_text, font=font, fill="black")
             
-            # Calculate coordinates for the underline (just below the text)
-            line_y = y_pos + text_h + 4
-            draw.line([(x_pos, line_y), (x_pos + text_w, line_y)], fill="black", width=3)
+            line_y = y_pos + text_h + 10
+            draw.line([(x_pos, line_y), (x_pos + text_w, line_y)], fill="black", width=4)
             
             # 5. Save to buffer for Streamlit to render
             buf = io.BytesIO()
@@ -394,7 +397,7 @@ with tab_qr:
             
             col1, col2 = st.columns([1, 2])
             with col1:
-                st.image(buf, caption=f"{qr_item_name} ({qr_code_text})", width=200)
+                st.image(buf, caption=f"{qr_item_name} ({qr_code_text})", width=250)
             with col2:
                 st.success("QR Code Generated successfully!")
                 st.download_button(
