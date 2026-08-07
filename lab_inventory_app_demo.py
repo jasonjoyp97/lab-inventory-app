@@ -2,6 +2,8 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime, timezone, timedelta
+import qrcode
+import io
 
 # --- TIMEZONE SETUP ---
 # Create a permanent IST timezone (+5 hours 30 mins)
@@ -100,8 +102,9 @@ if st.button("Logout"):
 
 st.divider()
 
-tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find Item", "📜 History Log"
+# Added tab_qr to the list of tabs
+tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_history = st.tabs([
+    "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find Item", "🖨️ Print Labels", "📜 History Log"
 ])
 
 # 1. VIEW STOCK TAB
@@ -160,7 +163,7 @@ with tab_add:
             existing_items_df = get_data("SELECT item_code, name, specs, room_no, rack_no FROM inventory WHERE category=?", (add_category,))
             if not existing_items_df.empty:
                 options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_no']} (Rack: {row['rack_no']})" for _, row in existing_items_df.iterrows()]
-                selection = st.selectbox("Search by Code or Name (Type to search):", options)
+                selection = st.selectbox("Search by Code or Name (Type to search/scan):", options)
                 input_code, input_name, input_specs = None, None, None
                 input_room_no, input_room_name, input_rack_no = None, None, None
             else:
@@ -195,7 +198,6 @@ with tab_add:
                              ON CONFLICT(item_code) DO UPDATE SET quantity=?''', 
                           (final_code, final_name, add_category, final_specs, final_r_no, final_r_name, final_rack, new_qty, new_qty))
                 
-                # Fetching time in IST
                 timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                 run_query('''INSERT INTO transactions 
                              (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
@@ -219,7 +221,7 @@ with tab_take:
     else:
         with st.form("take_form", clear_on_submit=True):
             take_options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_name']} ({row['rack_no']})" for _, row in available_items_df.iterrows()]
-            take_selection = st.selectbox("Search by Code, Name, or Location:", take_options)
+            take_selection = st.selectbox("Search by Code, Name, or Location (Type to search/scan):", take_options)
             
             take_qty = st.number_input("Quantity Needed", min_value=1, step=1)
             take_project = st.text_input("Project Name (Required)")
@@ -240,7 +242,6 @@ with tab_take:
                         new_qty = current_qty - take_qty
                         run_query("UPDATE inventory SET quantity=? WHERE item_code=?", (new_qty, take_code))
                         
-                        # Fetching time in IST
                         timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                         run_query('''INSERT INTO transactions 
                                      (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
@@ -314,7 +315,47 @@ with tab_find:
         else:
             st.warning("No items found matching your search.")
 
-# 6. HISTORY LOG TAB
+# 6. QR CODE LABELS TAB
+with tab_qr:
+    st.subheader("🖨️ Generate QR Code Labels")
+    st.write("Print these labels and stick them on your component bins. You can then use any standard USB barcode/QR scanner to select items instantly when checking in or out!")
+    
+    all_items_df = get_data("SELECT item_code, name, room_name, rack_no FROM inventory")
+    
+    if all_items_df.empty:
+        st.warning("No items in inventory to generate labels for.")
+    else:
+        qr_options = [f"{row['item_code']} | {row['name']} (Loc: {row['room_name']} / {row['rack_no']})" for _, row in all_items_df.iterrows()]
+        qr_selection = st.selectbox("Select Component for Label:", qr_options)
+        
+        if st.button("Generate QR Code"):
+            qr_code_text = qr_selection.split(" | ")[0]
+            qr_item_name = qr_selection.split(" | ")[1].split(" (Loc:")[0]
+            
+            # Generate QR code
+            qr = qrcode.QRCode(version=1, box_size=10, border=4)
+            qr.add_data(qr_code_text)
+            qr.make(fit=True)
+            
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Save to buffer for Streamlit to render
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.image(buf, caption=f"{qr_item_name} ({qr_code_text})", width=200)
+            with col2:
+                st.success("QR Code Generated successfully!")
+                st.download_button(
+                    label="📥 Download QR Image",
+                    data=buf.getvalue(),
+                    file_name=f"{qr_code_text}_label.png",
+                    mime="image/png"
+                )
+
+# 7. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
     df_history = get_data('''SELECT 
