@@ -102,7 +102,6 @@ if st.button("Logout"):
 
 st.divider()
 
-# Added tab_qr to the list of tabs
 tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_history = st.tabs([
     "📦 View Stock", "📥 Add/Purchase Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find Item", "🖨️ Print Labels", "📜 History Log"
 ])
@@ -318,23 +317,31 @@ with tab_find:
 # 6. QR CODE LABELS TAB
 with tab_qr:
     st.subheader("🖨️ Generate QR Code Labels")
-    st.write("Print these labels and stick them on your component bins. You can then use any standard USB barcode/QR scanner to select items instantly when checking in or out!")
+    st.write("Scan these printed labels with your phone camera to instantly view the component details, or use a USB scanner to rapidly fill forms.")
     
-    all_items_df = get_data("SELECT item_code, name, room_name, rack_no FROM inventory")
+    # Updated SQL to also fetch 'specs' for the QR payload
+    all_items_df = get_data("SELECT item_code, name, specs, room_name, rack_no FROM inventory")
     
     if all_items_df.empty:
         st.warning("No items in inventory to generate labels for.")
     else:
-        qr_options = [f"{row['item_code']} | {row['name']} (Loc: {row['room_name']} / {row['rack_no']})" for _, row in all_items_df.iterrows()]
+        qr_options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_name']} ({row['rack_no']})" for _, row in all_items_df.iterrows()]
         qr_selection = st.selectbox("Select Component for Label:", qr_options)
         
         if st.button("Generate QR Code"):
             qr_code_text = qr_selection.split(" | ")[0]
-            qr_item_name = qr_selection.split(" | ")[1].split(" (Loc:")[0]
+            
+            # Fetch the specific row details
+            item_data = all_items_df[all_items_df['item_code'] == qr_code_text].iloc[0]
+            qr_item_name = item_data['name']
+            qr_item_specs = item_data['specs']
+            
+            # Create a detailed multi-line payload for the QR code
+            detailed_qr_data = f"Code: {qr_code_text}\nItem: {qr_item_name}\nSpecs: {qr_item_specs}"
             
             # Generate QR code
             qr = qrcode.QRCode(version=1, box_size=10, border=4)
-            qr.add_data(qr_code_text)
+            qr.add_data(detailed_qr_data)
             qr.make(fit=True)
             
             img = qr.make_image(fill_color="black", back_color="white")
