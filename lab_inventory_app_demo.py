@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta
 import qrcode
 import io
+from PIL import Image, ImageDraw, ImageFont
 
 # --- TIMEZONE SETUP ---
 # Create a permanent IST timezone (+5 hours 30 mins)
@@ -319,7 +320,6 @@ with tab_qr:
     st.subheader("🖨️ Generate QR Code Labels")
     st.write("Scan these printed labels with your phone camera to instantly view the component details, or use a USB scanner to rapidly fill forms.")
     
-    # Updated SQL to also fetch 'specs' for the QR payload
     all_items_df = get_data("SELECT item_code, name, specs, room_name, rack_no FROM inventory")
     
     if all_items_df.empty:
@@ -335,20 +335,62 @@ with tab_qr:
             item_data = all_items_df[all_items_df['item_code'] == qr_code_text].iloc[0]
             qr_item_name = item_data['name']
             qr_item_specs = item_data['specs']
+            qr_rack_no = item_data['rack_no']
             
-            # Create a detailed multi-line payload for the QR code
             detailed_qr_data = f"Code: {qr_code_text}\nItem: {qr_item_name}\nSpecs: {qr_item_specs}"
             
-            # Generate QR code
+            # 1. Generate the base QR Code image
             qr = qrcode.QRCode(version=1, box_size=10, border=4)
             qr.add_data(detailed_qr_data)
             qr.make(fit=True)
             
-            img = qr.make_image(fill_color="black", back_color="white")
+            # Convert to RGB so we can draw clear text on it
+            qr_img = qr.make_image(fill_color="black", back_color="white").convert('RGB')
+            qr_w, qr_h = qr_img.size
             
-            # Save to buffer for Streamlit to render
+            # 2. Create a larger white canvas to fit both the text and the QR code
+            text_margin = 60
+            label_img = Image.new('RGB', (qr_w, qr_h + text_margin), 'white')
+            
+            # Paste the QR code onto the canvas, leaving space at the top
+            label_img.paste(qr_img, (0, text_margin))
+            
+            # 3. Setup Drawing tools
+            draw = ImageDraw.Draw(label_img)
+            
+            # Try to grab a default system bold font, fallback to standard if running on a strict cloud server
+            try:
+                font = ImageFont.truetype("DejaVuSans-Bold.ttf", 26)
+            except IOError:
+                try:
+                    font = ImageFont.truetype("arialbd.ttf", 26)
+                except IOError:
+                    font = ImageFont.load_default()
+            
+            label_text = f"RACK: {qr_rack_no}"
+            
+            # Calculate text size to center it perfectly
+            try:
+                left, top, right, bottom = draw.textbbox((0, 0), label_text, font=font)
+                text_w = right - left
+                text_h = bottom - top
+            except AttributeError:
+                # Fallback for older Pillow versions
+                text_w, text_h = draw.textsize(label_text, font=font)
+                
+            x_pos = (qr_w - text_w) // 2
+            y_pos = 15
+            
+            # 4. Draw the text and the underline
+            draw.text((x_pos, y_pos), label_text, font=font, fill="black")
+            
+            # Calculate coordinates for the underline (just below the text)
+            line_y = y_pos + text_h + 4
+            draw.line([(x_pos, line_y), (x_pos + text_w, line_y)], fill="black", width=3)
+            
+            # 5. Save to buffer for Streamlit to render
             buf = io.BytesIO()
-            img.save(buf, format="PNG")
+            label_img.save(buf, format="PNG")
             
             col1, col2 = st.columns([1, 2])
             with col1:
@@ -356,7 +398,7 @@ with tab_qr:
             with col2:
                 st.success("QR Code Generated successfully!")
                 st.download_button(
-                    label="📥 Download QR Image",
+                    label="📥 Download QR Label",
                     data=buf.getvalue(),
                     file_name=f"{qr_code_text}_label.png",
                     mime="image/png"
