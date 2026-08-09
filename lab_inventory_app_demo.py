@@ -7,23 +7,23 @@ import io
 import os
 import urllib.request
 from PIL import Image, ImageDraw, ImageFont
+import hashlib
 
 # --- TIMEZONE SETUP ---
-# Create a permanent IST timezone (+5 hours 30 mins)
 IST = timezone(timedelta(hours=5, minutes=30))
 
-# --- CONFIG & USERS ---
-try:
-    # Pulls the usernames and passwords securely from Streamlit Secrets
-    VALID_USERS = st.secrets["users"]
-except KeyError:
-    st.error("⚠️ User credentials not found! Please configure the [users] block in Streamlit Secrets.")
-    st.stop()
+# --- SECURITY HELPER FUNCTIONS ---
+def hash_password(password):
+    """Encrypts the password before saving to the database"""
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+def verify_password(provided_password, stored_hash):
+    """Checks if the provided password matches the database hash"""
+    return hash_password(provided_password) == stored_hash
 
 # --- DATABASE CONNECTION ENGINE ---
 def get_db_connection():
     try:
-        # Pulls the Supabase connection string exactly as you named it in the Secrets tab
         db_url = st.secrets["DATABASE_URL"]
         return psycopg2.connect(db_url)
     except KeyError:
@@ -42,85 +42,163 @@ def run_query(query, params=()):
 
 def get_data(query, params=()):
     conn = get_db_connection()
-    # Safely load query results into a pandas DataFrame
     df = pd.read_sql_query(query, conn, params=params)
     conn.close()
     return df
 
-# --- DATABASE SETUP & DEMO DATA ---
+# --- DATABASE SETUP ---
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Inventory Table (PostgreSQL uses BYTEA for images)
+    # 1. Inventory Table
     c.execute('''CREATE TABLE IF NOT EXISTS inventory
                  (item_code TEXT PRIMARY KEY, name TEXT, category TEXT, specs TEXT, 
                   room_no TEXT, room_name TEXT, rack_no TEXT, quantity INTEGER, 
                   low_stock_threshold INTEGER, image BYTEA)''')
                  
-    # Transaction Log (PostgreSQL uses SERIAL for auto-incrementing IDs)
+    # 2. Transaction Log
     c.execute('''CREATE TABLE IF NOT EXISTS transactions
                  (id SERIAL PRIMARY KEY, 
                   timestamp TEXT, user_name TEXT, category TEXT, item_code TEXT, item_name TEXT, 
                   specs TEXT, action TEXT, quantity INTEGER, project TEXT)''')
+                  
+    # 3. User Accounts Table
+    c.execute('''CREATE TABLE IF NOT EXISTS users
+                 (username TEXT PRIMARY KEY, password TEXT, role TEXT, status TEXT)''')
     
-    # Generate Demo Data if the database is completely empty
-    c.execute("SELECT COUNT(*) FROM inventory")
+    # Create the Master Admin account if the table is empty
+    c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
-        demo_items = [
-            ("ELEC-001", "Resistor", "Electronics", "10k Ohm, 0.25W [Through-Hole]", "101", "Prototyping Lab", "A-1", 500, 100, None),
-            ("ELEC-002", "Capacitor", "Electronics", "10uF, 50V, Electrolytic [SMT]", "101", "Prototyping Lab", "A-2", 200, 50, None),
-            ("ELEC-003", "Arduino Nano", "Electronics", "ATmega328P, 5V, Mini-B USB", "102", "Embedded Systems", "B-1", 15, 10, None),
-            ("ELEC-004", "LED Display", "Electronics", "16x2 Character, Blue Backlight", "102", "Embedded Systems", "B-2", 10, 5, None),
-            ("MECH-001", "Hex Nut", "Mechanical", "M3, Stainless Steel 304", "201", "Machine Shop", "Rack 1", 1000, 200, None),
-            ("MECH-002", "Allen Bolt", "Mechanical", "M4 x 12mm, Carbon Steel", "201", "Machine Shop", "Rack 1", 500, 100, None),
-            ("MECH-003", "Wooden Nail", "Mechanical", "2 inch, Galvanized", "205", "General Storage", "Shelf C", 400, 100, None),
-            ("MECH-004", "Clamp", "Mechanical", "C-Clamp, 2 inch opening", "201", "Machine Shop", "Tool Wall", 20, 5, None)
-        ]
-        # PostgreSQL uses %s instead of ? for variables
-        c.executemany("INSERT INTO inventory VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", demo_items)
-        
-        timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-        c.execute('''INSERT INTO transactions 
-                     (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project) 
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                  (timestamp, "admin", "Electronics", "ELEC-003", "Arduino Nano", "ATmega328P, 5V, Mini-B USB", "IN", 15, "Initial Lab Setup"))
+        admin_hash = hash_password("admin") # Default admin password
+        c.execute("INSERT INTO users (username, password, role, status) VALUES (%s, %s, %s, %s)", 
+                  ('admin', admin_hash, 'admin', 'approved'))
         
     conn.commit()
     conn.close()
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Lab Inventory", layout="wide")
-
-# Initialize Cloud DB
 init_db()
 
-# --- LOGIN SYSTEM ---
+# --- STATE MANAGEMENT ---
 if "current_user" not in st.session_state:
     st.session_state.current_user = None
+if "current_role" not in st.session_state:
+    st.session_state.current_role = None
 
+# --- LOGIN & REGISTRATION SYSTEM ---
 if not st.session_state.current_user:
-    st.title("🔒 Lab Inventory Login")
-    with st.form("login_form"):
-        username = st.text_input("Username").lower().strip()
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Login")
-        
-        if submitted:
-            if username in VALID_USERS and VALID_USERS[username] == password:
-                st.session_state.current_user = username
-                st.rerun()
-            else:
-                st.error("Invalid username or password.")
+    st.title("🔬 Lab Inventory Portal")
+    
+    tab_login, tab_signup = st.tabs(["🔒 Login", "📝 Request Access"])
+    
+    with tab_login:
+        with st.form("login_form"):
+            username = st.text_input("Username").lower().strip()
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login")
+            
+            if submitted:
+                if not username or not password:
+                    st.error("Please enter both username and password.")
+                else:
+                    user_df = get_data("SELECT password, role, status FROM users WHERE username = %s", (username,))
+                    if not user_df.empty:
+                        stored_hash = user_df.iloc[0]['password']
+                        status = user_df.iloc[0]['status']
+                        role = user_df.iloc[0]['role']
+                        
+                        if verify_password(password, stored_hash):
+                            if status == 'approved':
+                                st.session_state.current_user = username
+                                st.session_state.current_role = role
+                                st.rerun()
+                            else:
+                                st.warning("Your account is pending approval from the Admin.")
+                        else:
+                            st.error("Invalid username or password.")
+                    else:
+                        st.error("Invalid username or password.")
+                        
+    with tab_signup:
+        with st.form("signup_form", clear_on_submit=True):
+            st.write("Submit your details to the Admin for approval.")
+            new_user = st.text_input("Desired Username").lower().strip()
+            new_pass = st.text_input("Create Password", type="password")
+            confirm_pass = st.text_input("Confirm Password", type="password")
+            signup_submitted = st.form_submit_button("Request Account")
+            
+            if signup_submitted:
+                if not new_user or not new_pass:
+                    st.error("All fields are required.")
+                elif new_pass != confirm_pass:
+                    st.error("Passwords do not match.")
+                else:
+                    check_user = get_data("SELECT username FROM users WHERE username = %s", (new_user,))
+                    if not check_user.empty:
+                        st.error("Username already exists. Please choose another.")
+                    else:
+                        run_query("INSERT INTO users (username, password, role, status) VALUES (%s, %s, 'user', 'pending')", 
+                                  (new_user, hash_password(new_pass)))
+                        st.success("Access requested successfully! Please wait for Admin approval.")
     st.stop()
 
-# --- MAIN DASHBOARD ---
-st.title(f"🔬 Lab Inventory (Logged in as: {st.session_state.current_user.title()})")
-if st.button("Logout"):
-    st.session_state.current_user = None
-    st.rerun()
+# --- SIDEBAR: USER SETTINGS & ADMIN PANEL ---
+with st.sidebar:
+    st.header(f"👤 {st.session_state.current_user.title()}")
+    st.caption(f"Role: {st.session_state.current_role.title()}")
+    st.divider()
+    
+    # 1. Change Password (Available to everyone)
+    with st.expander("🔑 Change My Password"):
+        with st.form("change_pw_form", clear_on_submit=True):
+            old_pw = st.text_input("Current Password", type="password")
+            new_pw = st.text_input("New Password", type="password")
+            update_pw_btn = st.form_submit_button("Update Password")
+            
+            if update_pw_btn:
+                user_data = get_data("SELECT password FROM users WHERE username=%s", (st.session_state.current_user,))
+                if verify_password(old_pw, user_data.iloc[0]['password']):
+                    run_query("UPDATE users SET password=%s WHERE username=%s", (hash_password(new_pw), st.session_state.current_user))
+                    st.success("Password updated!")
+                else:
+                    st.error("Current password incorrect.")
+    
+    # 2. Admin Panel (Only visible to master admin)
+    if st.session_state.current_role == 'admin':
+        with st.expander("👑 Manage Users", expanded=True):
+            st.write("**Pending Approvals**")
+            pending_users = get_data("SELECT username FROM users WHERE status='pending'")
+            if pending_users.empty:
+                st.info("No pending requests.")
+            else:
+                for idx, row in pending_users.iterrows():
+                    col1, col2 = st.columns([2, 1])
+                    col1.write(row['username'])
+                    if col2.button("Approve", key=f"app_{row['username']}"):
+                        run_query("UPDATE users SET status='approved' WHERE username=%s", (row['username'],))
+                        st.rerun()
+            
+            st.divider()
+            st.write("**Active Users**")
+            active_users = get_data("SELECT username FROM users WHERE status='approved' AND role!='admin'")
+            if not active_users.empty:
+                user_to_delete = st.selectbox("Select User to Remove", active_users['username'].tolist())
+                if st.button("Delete User", type="primary"):
+                    run_query("DELETE FROM users WHERE username=%s", (user_to_delete,))
+                    st.success(f"Removed {user_to_delete}")
+                    st.rerun()
+            else:
+                st.info("No other active users.")
+                
+    st.divider()
+    if st.button("Logout", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
 
-st.divider()
+# --- MAIN DASHBOARD ---
+st.title("🔬 Lab Inventory Management")
 
 tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_warning, tab_history = st.tabs([
     "📦 View Stock", "📥 Add Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📜 History"
@@ -129,7 +207,6 @@ tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_warning, tab_histo
 # 1. VIEW STOCK TAB
 with tab_stock:
     st.subheader("⚡ Electronics")
-    # PostgreSQL requires double quotes for column aliases
     df_elec = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", 
                           room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", 
                           quantity as "Qty", low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Electronics' ''')
@@ -228,7 +305,6 @@ with tab_add:
                 current_qty = int(df_check.iloc[0]['quantity']) if not df_check.empty else 0
                 new_qty = current_qty + add_qty
                 
-                # UPSERT Syntax for PostgreSQL
                 run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity, low_stock_threshold, image) 
                              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
                              ON CONFLICT (item_code) DO UPDATE SET quantity=%s''', 
@@ -355,7 +431,6 @@ with tab_find:
     
     if search_query:
         query_param = f"%{search_query}%"
-        # PostgreSQL uses ILIKE for case-insensitive searching
         results_df = get_data('''SELECT item_code as "Code", name as "Component", 
                                  category as "Category", specs as "Specifications", 
                                  room_name || ' (' || room_no || ')' as "Room", 
@@ -366,7 +441,6 @@ with tab_find:
         
         if not results_df.empty:
             st.success(f"Found {len(results_df)} matching item(s):")
-            
             for idx, row in results_df.iterrows():
                 with st.container(border=True):
                     c1, c2 = st.columns([1, 4])
@@ -488,7 +562,6 @@ with tab_warning:
 # 8. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
-    # SPLIT_PART cleanly separates the timestamp in PostgreSQL
     df_history = get_data('''SELECT 
                              SPLIT_PART(timestamp, ' ', 1) as "Date",
                              SPLIT_PART(timestamp, ' ', 2) as "Time (IST)",
