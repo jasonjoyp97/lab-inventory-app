@@ -338,7 +338,7 @@ with tab_take:
         preview_data = get_data("SELECT image, quantity, name, specs FROM inventory WHERE item_code=%s", (take_code,)).iloc[0]
         
         col1, col2 = st.columns([1, 2])
-       with col1:
+        with col1:
             if preview_data['image'] is not None:
                 st.image(bytes(preview_data['image']), caption="Reference Image", use_container_width=True)
             else:
@@ -385,8 +385,8 @@ with tab_edit:
         current_code = edit_selection.split(" | ")[0]
         current_data = existing_items_df[existing_items_df['item_code'] == current_code].iloc[0]
         
-       if current_data['image'] is not None:
-            st.image(bytes(current_data['image']), width=150, caption="Current Picture")
+        if current_data['image'] is not None:
+             st.image(bytes(current_data['image']), width=150, caption="Current Picture")
             
         with st.form("edit_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
