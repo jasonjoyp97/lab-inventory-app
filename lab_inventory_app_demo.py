@@ -66,11 +66,16 @@ def init_db():
     # 3. User Accounts Table
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (username TEXT PRIMARY KEY, password TEXT, role TEXT, status TEXT)''')
+
+    # 4. Restock Notes (Messaging System) Table
+    c.execute('''CREATE TABLE IF NOT EXISTS restock_notes
+                 (id SERIAL PRIMARY KEY, timestamp TEXT, user_name TEXT, 
+                  item_code TEXT, item_name TEXT, message TEXT)''')
     
     # Create the Master Admin account if the table is empty
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
-        admin_hash = hash_password("admin") # Default admin password
+        admin_hash = hash_password("admin")
         c.execute("INSERT INTO users (username, password, role, status) VALUES (%s, %s, %s, %s)", 
                   ('admin', admin_hash, 'admin', 'approved'))
         
@@ -86,6 +91,8 @@ if "current_user" not in st.session_state:
     st.session_state.current_user = None
 if "current_role" not in st.session_state:
     st.session_state.current_role = None
+if "low_stock_alerted" not in st.session_state:
+    st.session_state.low_stock_alerted = False
 
 # --- LOGIN & REGISTRATION SYSTEM ---
 if not st.session_state.current_user:
@@ -113,6 +120,7 @@ if not st.session_state.current_user:
                             if status == 'approved':
                                 st.session_state.current_user = username
                                 st.session_state.current_role = role
+                                st.session_state.low_stock_alerted = False # Reset alert trigger for new login
                                 st.rerun()
                             else:
                                 st.warning("Your account is pending approval from the Admin.")
@@ -150,7 +158,6 @@ with st.sidebar:
     st.caption(f"Role: {st.session_state.current_role.title()}")
     st.divider()
     
-    # 1. Change Password (Available to everyone)
     with st.expander("🔑 Change My Password"):
         with st.form("change_pw_form", clear_on_submit=True):
             old_pw = st.text_input("Current Password", type="password")
@@ -165,7 +172,6 @@ with st.sidebar:
                 else:
                     st.error("Current password incorrect.")
     
-    # 2. Admin Panel (Only visible to master admin)
     if st.session_state.current_role == 'admin':
         with st.expander("👑 Manage Users", expanded=True):
             st.write("**Pending Approvals**")
@@ -196,6 +202,18 @@ with st.sidebar:
     if st.button("Logout", use_container_width=True):
         st.session_state.clear()
         st.rerun()
+
+# --- LOW STOCK LOGIN POPUP ALERT ---
+if not st.session_state.low_stock_alerted:
+    # Check the database for low stock items just once when they log in
+    low_stock_count_df = get_data("SELECT COUNT(*) FROM inventory WHERE quantity <= low_stock_threshold")
+    low_stock_count = int(low_stock_count_df.iloc[0, 0])
+    
+    if low_stock_count > 0:
+        # Fires a toast notification in the bottom right corner
+        st.toast(f"🚨 **Warning:** {low_stock_count} item(s) are currently running low on stock! Check the 'Low Stock' tab.", icon="⚠️")
+    
+    st.session_state.low_stock_alerted = True
 
 # --- MAIN DASHBOARD ---
 st.title("🔬 Lab Inventory Management")
@@ -386,7 +404,7 @@ with tab_edit:
         current_data = existing_items_df[existing_items_df['item_code'] == current_code].iloc[0]
         
         if current_data['image'] is not None:
-             st.image(bytes(current_data['image']), width=150, caption="Current Picture")
+            st.image(bytes(current_data['image']), width=150, caption="Current Picture")
             
         with st.form("edit_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
@@ -558,6 +576,52 @@ with tab_warning:
         )
     else:
         st.success("✅ All items are sufficiently stocked! No warnings to display.")
+
+    st.divider()
+
+    # --- NEW FEATURE: RESTOCK COMMUNICATION BOARD ---
+    st.subheader("💬 Restock Coordination")
+    st.write("Leave notes for your lab mates about reordering low stock components.")
+    
+    col_chat, col_form = st.columns([1.5, 1])
+    
+    with col_chat:
+        st.write("**Recent Notes:**")
+        # Fetch the last 20 messages securely
+        notes_df = get_data("SELECT timestamp, user_name, item_name, message FROM restock_notes ORDER BY id DESC LIMIT 20")
+        
+        if not notes_df.empty:
+            for _, row in notes_df.iterrows():
+                # Display messages beautifully with user and item context
+                st.info(f"👤 **{row['user_name'].title()}** ({row['timestamp']})\n\n📦 **{row['item_name']}:** {row['message']}")
+        else:
+            st.write("No notes have been posted yet.")
+            
+    with col_form:
+        if not df_warning.empty:
+            with st.form("add_note_form", clear_on_submit=True):
+                st.write("**Add a Note**")
+                # Create dropdown options restricted only to items currently low on stock
+                note_options = [f"{row['Code']} | {row['Component']}" for _, row in df_warning.iterrows()]
+                selected_note_item = st.selectbox("Select Low Component", note_options)
+                
+                # Input field for the message
+                note_msg = st.text_input("Message (e.g., 'Will order on GeM tomorrow', 'Found 10 extras in a drawer')")
+                submit_note = st.form_submit_button("Post Note")
+                
+                if submit_note:
+                    if note_msg.strip() == "":
+                        st.error("Message cannot be empty.")
+                    else:
+                        item_c = selected_note_item.split(" | ")[0]
+                        item_n = selected_note_item.split(" | ")[1]
+                        now = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                        
+                        run_query("INSERT INTO restock_notes (timestamp, user_name, item_code, item_name, message) VALUES (%s, %s, %s, %s, %s)", 
+                                  (now, st.session_state.current_user, item_c, item_n, note_msg))
+                        st.rerun()
+        else:
+            st.info("Stock levels are healthy. No items require coordination.")
 
 # 8. HISTORY LOG TAB
 with tab_history:
