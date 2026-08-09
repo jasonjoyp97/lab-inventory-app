@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 import qrcode
@@ -19,21 +19,48 @@ VALID_USERS = {
     "admin": "admin"
 }
 
+# --- DATABASE CONNECTION ENGINE ---
+def get_db_connection():
+    try:
+        # Pulls the Supabase connection string exactly as you named it in the Secrets tab
+        db_url = st.secrets["DATABASE_URL"]
+        return psycopg2.connect(db_url)
+    except KeyError:
+        st.error("⚠️ PostgreSQL connection string not found! Please check your Streamlit Secrets.")
+        st.stop()
+    except Exception as e:
+        st.error(f"⚠️ Failed to connect to database: {e}")
+        st.stop()
+
+def run_query(query, params=()):
+    conn = get_db_connection()
+    with conn.cursor() as c:
+        c.execute(query, params)
+    conn.commit()
+    conn.close()
+
+def get_data(query, params=()):
+    conn = get_db_connection()
+    # Safely load query results into a pandas DataFrame
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    return df
+
 # --- DATABASE SETUP & DEMO DATA ---
 def init_db():
-    conn = sqlite3.connect('lab_inventory.db')
+    conn = get_db_connection()
     c = conn.cursor()
     
-    # Inventory Table 
+    # Inventory Table (PostgreSQL uses BYTEA for images)
     c.execute('''CREATE TABLE IF NOT EXISTS inventory
                  (item_code TEXT PRIMARY KEY, name TEXT, category TEXT, specs TEXT, 
                   room_no TEXT, room_name TEXT, rack_no TEXT, quantity INTEGER, 
-                  low_stock_threshold INTEGER, image BLOB)''')
+                  low_stock_threshold INTEGER, image BYTEA)''')
                  
-    # Transaction Log 
+    # Transaction Log (PostgreSQL uses SERIAL for auto-incrementing IDs)
     c.execute('''CREATE TABLE IF NOT EXISTS transactions
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                  timestamp TEXT, user TEXT, category TEXT, item_code TEXT, item_name TEXT, 
+                 (id SERIAL PRIMARY KEY, 
+                  timestamp TEXT, user_name TEXT, category TEXT, item_code TEXT, item_name TEXT, 
                   specs TEXT, action TEXT, quantity INTEGER, project TEXT)''')
     
     # Generate Demo Data if the database is completely empty
@@ -49,35 +76,23 @@ def init_db():
             ("MECH-003", "Wooden Nail", "Mechanical", "2 inch, Galvanized", "205", "General Storage", "Shelf C", 400, 100, None),
             ("MECH-004", "Clamp", "Mechanical", "C-Clamp, 2 inch opening", "201", "Machine Shop", "Tool Wall", 20, 5, None)
         ]
-        c.executemany("INSERT INTO inventory VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", demo_items)
+        # PostgreSQL uses %s instead of ? for variables
+        c.executemany("INSERT INTO inventory VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", demo_items)
         
-        # Add an initial demo transaction with IST time
         timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
         c.execute('''INSERT INTO transactions 
-                     (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                     (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project) 
+                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
                   (timestamp, "admin", "Electronics", "ELEC-003", "Arduino Nano", "ATmega328P, 5V, Mini-B USB", "IN", 15, "Initial Lab Setup"))
         
     conn.commit()
     conn.close()
 
-def run_query(query, params=()):
-    conn = sqlite3.connect('lab_inventory.db')
-    c = conn.cursor()
-    c.execute(query, params)
-    conn.commit()
-    conn.close()
-
-def get_data(query, params=()):
-    conn = sqlite3.connect('lab_inventory.db')
-    df = pd.read_sql_query(query, conn, params=params)
-    conn.close()
-    return df
-
-init_db()
-
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Lab Inventory", layout="wide")
+
+# Initialize Cloud DB
+init_db()
 
 # --- LOGIN SYSTEM ---
 if "current_user" not in st.session_state:
@@ -113,9 +128,10 @@ tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_warning, tab_histo
 # 1. VIEW STOCK TAB
 with tab_stock:
     st.subheader("⚡ Electronics")
-    df_elec = get_data('''SELECT item_code as 'Code', name as 'Component', specs as 'Specifications', 
-                          room_name || ' (' || room_no || ')' as 'Room', rack_no as 'Rack', 
-                          quantity as 'Qty', low_stock_threshold as 'Warning Lvl' FROM inventory WHERE category='Electronics' ''')
+    # PostgreSQL requires double quotes for column aliases
+    df_elec = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", 
+                          room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", 
+                          quantity as "Qty", low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Electronics' ''')
     if not df_elec.empty:
         st.dataframe(df_elec, use_container_width=True, hide_index=True)
     else:
@@ -124,9 +140,9 @@ with tab_stock:
     st.divider()
         
     st.subheader("⚙️ Mechanical")
-    df_mech = get_data('''SELECT item_code as 'Code', name as 'Component', specs as 'Specifications', 
-                          room_name || ' (' || room_no || ')' as 'Room', rack_no as 'Rack', 
-                          quantity as 'Qty', low_stock_threshold as 'Warning Lvl' FROM inventory WHERE category='Mechanical' ''')
+    df_mech = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", 
+                          room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", 
+                          quantity as "Qty", low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Mechanical' ''')
     if not df_mech.empty:
         st.dataframe(df_mech, use_container_width=True, hide_index=True)
     else:
@@ -149,7 +165,6 @@ with tab_add:
                 if add_category == "Electronics":
                     spec_hint = "e.g., 10uF, 50V"
                     input_specs = st.text_input(f"Specifications ({spec_hint})").strip()
-                    # Add Mounting Type option specifically for Electronics
                     mounting_type = st.radio("Mounting Type", ["None", "SMT", "Through-Hole"], horizontal=True)
                     input_threshold = st.number_input("Low Stock Warning Level", min_value=1, step=1, value=10)
                 else:
@@ -171,7 +186,7 @@ with tab_add:
                 
             selection = None
         else:
-            existing_items_df = get_data("SELECT item_code, name, specs, room_no, rack_no, low_stock_threshold FROM inventory WHERE category=?", (add_category,))
+            existing_items_df = get_data("SELECT item_code, name, specs, room_no, rack_no, low_stock_threshold FROM inventory WHERE category=%s", (add_category,))
             if not existing_items_df.empty:
                 options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_no']} (Rack: {row['rack_no']})" for _, row in existing_items_df.iterrows()]
                 selection = st.selectbox("Search by Code or Name (Type to search/scan):", options)
@@ -187,7 +202,6 @@ with tab_add:
         
         if add_submit:
             if add_type == "Register Brand New Item":
-                # Automatically append the mounting type to the specs string if selected
                 final_specs = input_specs
                 if mounting_type != "None":
                     final_specs = f"{input_specs} [{mounting_type}]" if input_specs else f"[{mounting_type}]"
@@ -200,7 +214,7 @@ with tab_add:
                 parts = selection.split(" | ")
                 final_code = parts[0]
                 
-                existing_item = get_data("SELECT name, specs, room_no, room_name, rack_no, low_stock_threshold, image FROM inventory WHERE item_code=?", (final_code,)).iloc[0]
+                existing_item = get_data("SELECT name, specs, room_no, room_name, rack_no, low_stock_threshold, image FROM inventory WHERE item_code=%s", (final_code,)).iloc[0]
                 final_name, final_specs = existing_item['name'], existing_item['specs']
                 final_r_no, final_r_name, final_rack = existing_item['room_no'], existing_item['room_name'], existing_item['rack_no']
                 final_threshold = existing_item['low_stock_threshold']
@@ -209,19 +223,20 @@ with tab_add:
                 final_code, final_name, final_specs = None, None, None
             
             if final_code and final_name:
-                df_check = get_data("SELECT quantity FROM inventory WHERE item_code=?", (final_code,))
+                df_check = get_data("SELECT quantity FROM inventory WHERE item_code=%s", (final_code,))
                 current_qty = int(df_check.iloc[0]['quantity']) if not df_check.empty else 0
                 new_qty = current_qty + add_qty
                 
+                # UPSERT Syntax for PostgreSQL
                 run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity, low_stock_threshold, image) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-                             ON CONFLICT(item_code) DO UPDATE SET quantity=?''', 
+                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+                             ON CONFLICT (item_code) DO UPDATE SET quantity=%s''', 
                           (final_code, final_name, add_category, final_specs, final_r_no, final_r_name, final_rack, new_qty, final_threshold, final_img_bytes, new_qty))
                 
                 timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                 run_query('''INSERT INTO transactions 
-                             (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                             (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project) 
+                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
                           (timestamp, st.session_state.current_user, add_category, final_code, final_name, final_specs, "IN", add_qty, add_project))
                 
                 st.success(f"Added {add_qty} x {final_name} ({final_code}). Total: {new_qty}")
@@ -234,7 +249,7 @@ with tab_take:
     st.subheader("Check Out Items")
     take_category = st.radio("Which category?", ["Electronics", "Mechanical"], key="take_cat")
     
-    available_items_df = get_data("SELECT item_code, name, specs, room_name, rack_no FROM inventory WHERE category=? AND quantity > 0", (take_category,))
+    available_items_df = get_data("SELECT item_code, name, specs, room_name, rack_no FROM inventory WHERE category=%s AND quantity > 0", (take_category,))
     
     if available_items_df.empty:
         st.warning(f"No {take_category} items currently in stock.")
@@ -243,7 +258,7 @@ with tab_take:
         take_selection = st.selectbox("Search by Code, Name, or Location (Type to search/scan):", take_options)
         take_code = take_selection.split(" | ")[0]
         
-        preview_data = get_data("SELECT image, quantity, name, specs FROM inventory WHERE item_code=?", (take_code,)).iloc[0]
+        preview_data = get_data("SELECT image, quantity, name, specs FROM inventory WHERE item_code=%s", (take_code,)).iloc[0]
         
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -266,12 +281,12 @@ with tab_take:
                         st.error("Please specify a project.")
                     else:
                         new_qty = int(preview_data['quantity']) - take_qty
-                        run_query("UPDATE inventory SET quantity=? WHERE item_code=?", (new_qty, take_code))
+                        run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
                         
                         timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                         run_query('''INSERT INTO transactions 
-                                     (timestamp, user, category, item_code, item_name, specs, action, quantity, project) 
-                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                                     (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project) 
+                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
                                   (timestamp, st.session_state.current_user, take_category, take_code, preview_data['name'], preview_data['specs'], "OUT", take_qty, take_project))
                         
                         st.success(f"Checked out {take_qty} x {preview_data['name']}. Remaining: {new_qty}")
@@ -282,7 +297,7 @@ with tab_edit:
     st.subheader("Edit Item Details & Location")
     edit_category = st.radio("Select Category:", ["Electronics", "Mechanical"], key="edit_cat", horizontal=True)
     
-    existing_items_df = get_data("SELECT item_code, name, specs, room_no, room_name, rack_no, low_stock_threshold, image FROM inventory WHERE category=?", (edit_category,))
+    existing_items_df = get_data("SELECT item_code, name, specs, room_no, room_name, rack_no, low_stock_threshold, image FROM inventory WHERE category=%s", (edit_category,))
     
     if existing_items_df.empty:
         st.warning(f"No {edit_category} items exist yet.")
@@ -318,16 +333,16 @@ with tab_edit:
                     if new_image is not None:
                         img_bytes = new_image.getvalue()
                         run_query('''UPDATE inventory 
-                                     SET name=?, specs=?, room_no=?, room_name=?, rack_no=?, low_stock_threshold=?, image=? 
-                                     WHERE item_code=?''', 
+                                     SET name=%s, specs=%s, room_no=%s, room_name=%s, rack_no=%s, low_stock_threshold=%s, image=%s 
+                                     WHERE item_code=%s''', 
                                   (new_name, new_specs, new_room_no, new_room_name, new_rack_no, new_threshold, img_bytes, current_code))
                     else:
                         run_query('''UPDATE inventory 
-                                     SET name=?, specs=?, room_no=?, room_name=?, rack_no=?, low_stock_threshold=? 
-                                     WHERE item_code=?''', 
+                                     SET name=%s, specs=%s, room_no=%s, room_name=%s, rack_no=%s, low_stock_threshold=%s 
+                                     WHERE item_code=%s''', 
                                   (new_name, new_specs, new_room_no, new_room_name, new_rack_no, new_threshold, current_code))
                                   
-                    run_query("UPDATE transactions SET item_name=?, specs=? WHERE item_code=?", (new_name, new_specs, current_code))
+                    run_query("UPDATE transactions SET item_name=%s, specs=%s WHERE item_code=%s", (new_name, new_specs, current_code))
                     
                     st.success(f"Successfully updated {current_code}!")
                     st.rerun()
@@ -339,12 +354,13 @@ with tab_find:
     
     if search_query:
         query_param = f"%{search_query}%"
-        results_df = get_data('''SELECT item_code as 'Code', name as 'Component', 
-                                 category as 'Category', specs as 'Specifications', 
-                                 room_name || ' (' || room_no || ')' as 'Room', 
-                                 rack_no as 'Rack', quantity as 'Qty', image 
+        # PostgreSQL uses ILIKE for case-insensitive searching
+        results_df = get_data('''SELECT item_code as "Code", name as "Component", 
+                                 category as "Category", specs as "Specifications", 
+                                 room_name || ' (' || room_no || ')' as "Room", 
+                                 rack_no as "Rack", quantity as "Qty", image 
                                  FROM inventory 
-                                 WHERE name LIKE ? OR item_code LIKE ? OR specs LIKE ?''', 
+                                 WHERE name ILIKE %s OR item_code ILIKE %s OR specs ILIKE %s''', 
                               (query_param, query_param, query_param))
         
         if not results_df.empty:
@@ -448,9 +464,9 @@ with tab_warning:
     st.subheader("⚠️ Low Stock Alerts")
     st.write("Components that have dropped to or below their warning threshold.")
     
-    df_warning = get_data('''SELECT item_code as 'Code', name as 'Component', category as 'Category', 
-                             quantity as 'Current Qty', low_stock_threshold as 'Warning Level', 
-                             room_name || ' (' || rack_no || ')' as 'Location' 
+    df_warning = get_data('''SELECT item_code as "Code", name as "Component", category as "Category", 
+                             quantity as "Current Qty", low_stock_threshold as "Warning Level", 
+                             room_name || ' (' || rack_no || ')' as "Location" 
                              FROM inventory WHERE quantity <= low_stock_threshold ORDER BY category, name''')
     
     if not df_warning.empty:
@@ -471,12 +487,13 @@ with tab_warning:
 # 8. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
+    # SPLIT_PART cleanly separates the timestamp in PostgreSQL
     df_history = get_data('''SELECT 
-                             DATE(timestamp) as 'Date',
-                             TIME(timestamp) as 'Time (IST)',
-                             user as 'User', 
-                             category as 'Type', item_code as 'Code', item_name as 'Component', 
-                             specs as 'Specifications', action as 'IN/OUT', 
-                             quantity as 'Qty', project as 'Project' 
+                             SPLIT_PART(timestamp, ' ', 1) as "Date",
+                             SPLIT_PART(timestamp, ' ', 2) as "Time (IST)",
+                             user_name as "User", 
+                             category as "Type", item_code as "Code", item_name as "Component", 
+                             specs as "Specifications", action as "IN/OUT", 
+                             quantity as "Qty", project as "Project" 
                              FROM transactions ORDER BY id DESC''')
     st.dataframe(df_history, use_container_width=True, hide_index=True)
