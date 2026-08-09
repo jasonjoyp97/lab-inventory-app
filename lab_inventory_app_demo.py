@@ -13,11 +13,12 @@ from PIL import Image, ImageDraw, ImageFont
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # --- CONFIG & USERS ---
-VALID_USERS = {
-    "jason": "jason123",
-    "ajin": "ajin",
-    "admin": "admin"
-}
+try:
+    # Pulls the usernames and passwords securely from Streamlit Secrets
+    VALID_USERS = st.secrets["users"]
+except KeyError:
+    st.error("⚠️ User credentials not found! Please configure the [users] block in Streamlit Secrets.")
+    st.stop()
 
 # --- DATABASE CONNECTION ENGINE ---
 def get_db_connection():
