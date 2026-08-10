@@ -141,11 +141,6 @@ if "low_stock_alerted" not in st.session_state:
 # --- LOGIN & REGISTRATION SYSTEM ---
 if not st.session_state.current_user:
     st.title("🔬 Lab Inventory Portal")
-# ... rest of your code continues here
-
-# --- LOGIN & REGISTRATION SYSTEM ---
-if not st.session_state.current_user:
-    st.title("🔬 Lab Inventory Portal")
     
     tab_login, tab_signup = st.tabs(["🔒 Login", "📝 Request Access"])
     
