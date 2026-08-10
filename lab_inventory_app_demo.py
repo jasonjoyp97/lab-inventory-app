@@ -626,7 +626,34 @@ with tab_warning:
 # 8. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
+    
+    # --- NEW FEATURE: ADMIN HISTORY MANAGEMENT ---
+    if st.session_state.current_role == 'admin':
+        with st.expander("🛠️ Admin Tools: Manage History", expanded=False):
+            st.warning("⚠️ **Note:** Deleting a log here only removes the text record. It DOES NOT reverse the physical stock quantity. Use 'Edit Items' to fix actual stock levels.")
+            
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                del_id = st.number_input("Enter Log ID to Delete:", min_value=1, step=1)
+            with col2:
+                st.write("") # Vertical spacing alignment
+                st.write("")
+                if st.button("Delete Single Record", type="primary"):
+                    run_query("DELETE FROM transactions WHERE id=%s", (del_id,))
+                    st.success(f"Record #{del_id} deleted.")
+                    st.rerun()
+            
+            st.divider()
+            
+            # The "Nuclear Option" for when testing is done
+            if st.button("🚨 Clear ALL History (Prepare for Official Launch)", use_container_width=True):
+                run_query("DELETE FROM transactions")
+                st.success("All history cleared!")
+                st.rerun()
+
+    # Added 'id as "Log ID"' to the SQL query so the admin knows which number to type
     df_history = get_data('''SELECT 
+                             id as "Log ID",
                              SPLIT_PART(timestamp, ' ', 1) as "Date",
                              SPLIT_PART(timestamp, ' ', 2) as "Time (IST)",
                              user_name as "User", 
@@ -634,4 +661,5 @@ with tab_history:
                              specs as "Specifications", action as "IN/OUT", 
                              quantity as "Qty", project as "Project" 
                              FROM transactions ORDER BY id DESC''')
+    
     st.dataframe(df_history, use_container_width=True, hide_index=True)
