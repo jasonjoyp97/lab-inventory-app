@@ -8,6 +8,7 @@ import os
 import urllib.request
 from PIL import Image, ImageDraw, ImageFont
 import hashlib
+import plotly.express as px
 
 # --- TIMEZONE SETUP ---
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -183,7 +184,6 @@ if not st.session_state.current_user:
             new_pass = st.text_input("Create Password", type="password")
             confirm_pass = st.text_input("Confirm Password", type="password")
             
-            # --- NEW: Department Selection ---
             new_dept = st.radio("Select Department:", ["Mechanical", "Electronics"], horizontal=True)
             
             signup_submitted = st.form_submit_button("Request Account")
@@ -223,11 +223,9 @@ with st.sidebar:
                 else:
                     st.error("Current password incorrect.")
     
-    # 2. Admin Panel (Only visible to admins)
     if st.session_state.current_role == 'admin':
         with st.expander("👑 Manage Users & Roles", expanded=True):
             st.write("**Pending Approvals**")
-            # Now pulls department so the admin knows who they are approving
             pending_users = get_data("SELECT username, department FROM users WHERE status='pending'")
             
             if pending_users.empty:
@@ -243,18 +241,15 @@ with st.sidebar:
             st.divider()
             st.write("**Manage Active Users**")
             
-            # Pulls everyone EXCEPT the admin who is currently clicking buttons (prevents accidental self-deletion)
             active_users = get_data("SELECT username, role, department FROM users WHERE status='approved' AND username != %s", (st.session_state.current_user,))
             
             if not active_users.empty:
-                # Format dropdown options to show current role and department
                 user_options = [f"{row['username']} | Role: {row['role'].title()} | Dept: {row['department']}" for _, row in active_users.iterrows()]
                 selected_user_str = st.selectbox("Select User to Modify:", user_options)
                 selected_user = selected_user_str.split(" | ")[0]
                 
                 col_mod1, col_mod2, col_mod3 = st.columns(3)
                 
-                # --- NEW: Admin Privilege Controls ---
                 with col_mod1:
                     if st.button("Make Admin", use_container_width=True):
                         run_query("UPDATE users SET role='admin' WHERE username=%s", (selected_user,))
@@ -280,12 +275,10 @@ with st.sidebar:
 
 # --- LOW STOCK LOGIN POPUP ALERT ---
 if not st.session_state.low_stock_alerted:
-    # Check the database for low stock items just once when they log in
     low_stock_count_df = get_data("SELECT COUNT(*) FROM inventory WHERE quantity <= low_stock_threshold")
     low_stock_count = int(low_stock_count_df.iloc[0, 0])
     
     if low_stock_count > 0:
-        # Fires a toast notification in the bottom right corner
         st.toast(f"🚨 **Warning:** {low_stock_count} item(s) are currently running low on stock! Check the 'Low Stock' tab.", icon="⚠️")
     
     st.session_state.low_stock_alerted = True
@@ -293,8 +286,9 @@ if not st.session_state.low_stock_alerted:
 # --- MAIN DASHBOARD ---
 st.title("🔬 Lab Inventory Management")
 
-tab_stock, tab_add, tab_take, tab_edit, tab_find, tab_qr, tab_warning, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add Items", "📤 Take Items", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📜 History"
+# Note the two new tabs added to this array
+tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_history = st.tabs([
+    "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "📜 History"
 ])
 
 # 1. VIEW STOCK TAB
@@ -375,7 +369,7 @@ with tab_add:
         with col_price:
             add_price = st.number_input("Unit Price (₹)", min_value=0.0, step=0.5, format="%.2f")
             
-        add_project = st.text_input("Project / Reason (e.g., GeM Order, Organ Transport Prototype)")
+        add_project = st.text_input("Project / Reason (e.g., GeM Order, General Stock)")
         add_submit = st.form_submit_button("Add to Inventory")
         
         if add_submit:
@@ -451,7 +445,7 @@ with tab_take:
             
             with st.form("take_form", clear_on_submit=True):
                 take_qty = st.number_input("Quantity Needed", min_value=1, max_value=int(preview_data['quantity']), step=1)
-                take_project = st.text_input("Project Name (Required)")
+                take_project = st.text_input("Project Name (Required, e.g., Organ Transport Prototype)")
                 take_submit = st.form_submit_button("Check Out")
                 
                 if take_submit:
@@ -473,7 +467,83 @@ with tab_take:
                         st.success(f"Checked out {take_qty} x {preview_data['name']}. Remaining: {new_qty}")
                         st.rerun()
 
-# 4. EDIT ITEMS TAB
+# 4. NEW: BOM CHECKOUT TAB
+with tab_bom:
+    st.subheader("🛒 Bill of Materials (BOM) Checkout")
+    st.write("Upload a CSV file to check out multiple components simultaneously for a large prototype build.")
+    
+    # Provide a downloadable template for the user
+    template_df = pd.DataFrame({"Item Code": ["ELEC-01", "MECH-02"], "Quantity Needed": [5, 12]})
+    st.download_button("📄 Download CSV Template", template_df.to_csv(index=False).encode('utf-8'), "BOM_Template.csv", "text/csv")
+    
+    uploaded_bom = st.file_uploader("Upload BOM (CSV)", type=['csv'])
+    
+    if uploaded_bom is not None:
+        bom_df = pd.read_csv(uploaded_bom)
+        
+        # Validation check for proper columns
+        if "Item Code" not in bom_df.columns or "Quantity Needed" not in bom_df.columns:
+            st.error("Invalid CSV format. Please ensure columns are named 'Item Code' and 'Quantity Needed'.")
+        else:
+            st.write("**BOM Preview:**")
+            st.dataframe(bom_df, hide_index=True)
+            
+            with st.form("bom_checkout_form"):
+                bom_project = st.text_input("Project Name (e.g., Organ Transport Prototype v2)")
+                bom_submit = st.form_submit_button("Process BOM Checkout")
+                
+                if bom_submit:
+                    if not bom_project:
+                        st.error("Project Name is required to process the BOM.")
+                    else:
+                        success_count = 0
+                        errors = []
+                        
+                        # Loop through the CSV and process each item
+                        for idx, row in bom_df.iterrows():
+                            code = str(row['Item Code']).strip()
+                            try:
+                                qty_needed = int(row['Quantity Needed'])
+                            except ValueError:
+                                errors.append(f"❌ Invalid quantity for {code}.")
+                                continue
+                                
+                            # Check stock
+                            item_data = get_data("SELECT name, specs, quantity, unit_price, category FROM inventory WHERE item_code=%s", (code,))
+                            
+                            if item_data.empty:
+                                errors.append(f"❌ Item '{code}' not found in the lab inventory.")
+                                continue
+                                
+                            current_qty = int(item_data.iloc[0]['quantity'])
+                            if current_qty < qty_needed:
+                                errors.append(f"⚠️ Insufficient stock for {code} ({item_data.iloc[0]['name']}). Need {qty_needed}, but only have {current_qty}.")
+                                continue
+                                
+                            # If checks pass, deduct stock and log transaction
+                            new_qty = current_qty - qty_needed
+                            unit_price = float(item_data.iloc[0]['unit_price']) if pd.notna(item_data.iloc[0]['unit_price']) else 0.0
+                            total_val = qty_needed * unit_price
+                            name = item_data.iloc[0]['name']
+                            specs = item_data.iloc[0]['specs']
+                            cat = item_data.iloc[0]['category']
+                            
+                            run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, code))
+                            
+                            timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
+                            run_query('''INSERT INTO transactions 
+                                         (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project, unit_price, total_value) 
+                                         VALUES (%s, %s, %s, %s, %s, %s, 'OUT', %s, %s, %s, %s)''',
+                                      (timestamp, st.session_state.current_user, cat, code, name, specs, qty_needed, bom_project, unit_price, total_val))
+                            success_count += 1
+                            
+                        if success_count > 0:
+                            st.success(f"Successfully checked out {success_count} components for '{bom_project}'!")
+                        if errors:
+                            for err in errors:
+                                st.error(err)
+
+# 5. EDIT ITEMS TAB
 with tab_edit:
     st.subheader("Edit Item Details & Location")
     edit_category = st.radio("Select Category:", ["Electronics", "Mechanical"], key="edit_cat", horizontal=True)
@@ -528,7 +598,7 @@ with tab_edit:
                     st.success(f"Successfully updated {current_code}!")
                     st.rerun()
 
-# 5. FIND ITEM TAB
+# 6. FIND ITEM TAB
 with tab_find:
     st.subheader("🔍 Find Component Location")
     search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
@@ -561,7 +631,7 @@ with tab_find:
         else:
             st.warning("No items found matching your search.")
 
-# 6. QR CODE LABELS TAB
+# 7. QR CODE LABELS TAB
 with tab_qr:
     st.subheader("🖨️ Generate QR Code Labels")
     st.write("Scan these printed labels with your phone camera to instantly view the component details, or use a USB scanner to rapidly fill forms.")
@@ -638,7 +708,7 @@ with tab_qr:
                     mime="image/png"
                 )
 
-# 7. LOW STOCK WARNING TAB
+# 8. LOW STOCK WARNING TAB
 with tab_warning:
     st.subheader("⚠️ Low Stock Alerts")
     st.write("Components that have dropped to or below their warning threshold.")
@@ -665,7 +735,6 @@ with tab_warning:
 
     st.divider()
 
-    # --- NEW FEATURE: RESTOCK COMMUNICATION BOARD ---
     st.subheader("💬 Restock Coordination")
     st.write("Leave notes for your lab mates about reordering low stock components.")
     
@@ -673,12 +742,10 @@ with tab_warning:
     
     with col_chat:
         st.write("**Recent Notes:**")
-        # Fetch the last 20 messages securely
         notes_df = get_data("SELECT timestamp, user_name, item_name, message FROM restock_notes ORDER BY id DESC LIMIT 20")
         
         if not notes_df.empty:
             for _, row in notes_df.iterrows():
-                # Display messages beautifully with user and item context
                 st.info(f"👤 **{row['user_name'].title()}** ({row['timestamp']})\n\n📦 **{row['item_name']}:** {row['message']}")
         else:
             st.write("No notes have been posted yet.")
@@ -687,11 +754,9 @@ with tab_warning:
         if not df_warning.empty:
             with st.form("add_note_form", clear_on_submit=True):
                 st.write("**Add a Note**")
-                # Create dropdown options restricted only to items currently low on stock
                 note_options = [f"{row['Code']} | {row['Component']}" for _, row in df_warning.iterrows()]
                 selected_note_item = st.selectbox("Select Low Component", note_options)
                 
-                # Input field for the message
                 note_msg = st.text_input("Message (e.g., 'Will order on GeM tomorrow', 'Found 10 extras in a drawer')")
                 submit_note = st.form_submit_button("Post Note")
                 
@@ -709,11 +774,46 @@ with tab_warning:
         else:
             st.info("Stock levels are healthy. No items require coordination.")
 
-# 8. HISTORY LOG TAB
+# 9. NEW: ANALYTICS TAB (ADMIN ONLY)
+with tab_analytics:
+    st.subheader("📊 Financial Analytics & Cost Tracking")
+    
+    if st.session_state.current_role == 'admin':
+        st.write("Track capital expenditure across all R&D projects.")
+        
+        # Fetch project costs (Action = OUT means items were consumed for a project)
+        cost_df = get_data("SELECT project as \"Project\", SUM(total_value) as \"Total Cost (₹)\" FROM transactions WHERE action='OUT' GROUP BY project")
+        
+        if not cost_df.empty and cost_df["Total Cost (₹)"].sum() > 0:
+            # Clean up empty project names if any
+            cost_df = cost_df[cost_df["Project"] != ""]
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                # Generate a sleek Plotly donut chart
+                fig = px.pie(cost_df, values='Total Cost (₹)', names='Project', 
+                             title='Capital Expenditure by Project',
+                             hole=0.4, 
+                             color_discrete_sequence=px.colors.sequential.RdBu)
+                             
+                # Set the background to transparent to perfectly match the CSS gradient
+                fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="#f8fafc")
+                st.plotly_chart(fig, use_container_width=True)
+                
+            with col2:
+                st.write("**Cost Breakdown Table**")
+                st.dataframe(cost_df, hide_index=True, use_container_width=True)
+                st.metric("Total Lab Expenditure", f"₹{cost_df['Total Cost (₹)'].sum():,.2f}")
+        else:
+            st.info("No project expenditure data available yet. Start checking out items to generate analytics.")
+    else:
+        st.warning("🔒 Financial analytics and capital expenditure tracking are restricted to Admin accounts only.")
+
+# 10. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
     
-    # --- NEW FEATURE: ADMIN HISTORY MANAGEMENT ---
     if st.session_state.current_role == 'admin':
         with st.expander("🛠️ Admin Tools: Manage History", expanded=False):
             st.warning("⚠️ **Note:** Deleting a log here only removes the text record. It DOES NOT reverse the physical stock quantity. Use 'Edit Items' to fix actual stock levels.")
@@ -722,7 +822,7 @@ with tab_history:
             with col1:
                 del_id = st.number_input("Enter Log ID to Delete:", min_value=1, step=1)
             with col2:
-                st.write("") # Vertical spacing alignment
+                st.write("") 
                 st.write("")
                 if st.button("Delete Single Record", type="primary"):
                     run_query("DELETE FROM transactions WHERE id=%s", (del_id,))
@@ -731,13 +831,11 @@ with tab_history:
             
             st.divider()
             
-            # The "Nuclear Option" for when testing is done
             if st.button("🚨 Clear ALL History (Prepare for Official Launch)", use_container_width=True):
                 run_query("DELETE FROM transactions")
                 st.success("All history cleared!")
                 st.rerun()
 
-    # Added 'id as "Log ID"' to the SQL query so the admin knows which number to type
     df_history = get_data('''SELECT 
                              id as "Log ID",
                              SPLIT_PART(timestamp, ' ', 1) as "Date",
