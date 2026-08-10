@@ -71,6 +71,21 @@ def init_db():
     c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='department'")
     if not c.fetchone():
         c.execute("ALTER TABLE users ADD COLUMN department TEXT")
+
+    # 4. Restock Notes (Messaging System) Table
+    c.execute('''CREATE TABLE IF NOT EXISTS restock_notes
+                 (id SERIAL PRIMARY KEY, timestamp TEXT, user_name TEXT, 
+                  item_code TEXT, item_name TEXT, message TEXT)''')
+                  
+    # 5. Add Pricing Columns (Safely updates existing tables)
+    c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='inventory' AND column_name='unit_price'")
+    if not c.fetchone():
+        c.execute("ALTER TABLE inventory ADD COLUMN unit_price REAL DEFAULT 0.0")
+        
+    c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='transactions' AND column_name='unit_price'")
+    if not c.fetchone():
+        c.execute("ALTER TABLE transactions ADD COLUMN unit_price REAL DEFAULT 0.0")
+        c.execute("ALTER TABLE transactions ADD COLUMN total_value REAL DEFAULT 0.0")
     
     # Create the Master Admin account if the table is completely empty
     c.execute("SELECT COUNT(*) FROM users")
@@ -78,18 +93,6 @@ def init_db():
         admin_hash = hash_password("admin") # Default admin password
         c.execute("INSERT INTO users (username, password, role, status, department) VALUES (%s, %s, %s, %s, %s)", 
                   ('admin', admin_hash, 'admin', 'approved', 'Admin'))
-
-    # 4. Restock Notes (Messaging System) Table
-    c.execute('''CREATE TABLE IF NOT EXISTS restock_notes
-                 (id SERIAL PRIMARY KEY, timestamp TEXT, user_name TEXT, 
-                  item_code TEXT, item_name TEXT, message TEXT)''')
-    
-    # Create the Master Admin account if the table is empty
-    c.execute("SELECT COUNT(*) FROM users")
-    if c.fetchone()[0] == 0:
-        admin_hash = hash_password("admin")
-        c.execute("INSERT INTO users (username, password, role, status) VALUES (%s, %s, %s, %s)", 
-                  ('admin', admin_hash, 'admin', 'approved'))
         
     conn.commit()
     conn.close()
@@ -219,7 +222,8 @@ with st.sidebar:
                     st.success("Password updated!")
                 else:
                     st.error("Current password incorrect.")
-   # 2. Admin Panel (Only visible to admins)
+    
+    # 2. Admin Panel (Only visible to admins)
     if st.session_state.current_role == 'admin':
         with st.expander("👑 Manage Users & Roles", expanded=True):
             st.write("**Pending Approvals**")
@@ -298,7 +302,8 @@ with tab_stock:
     st.subheader("⚡ Electronics")
     df_elec = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", 
                           room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", 
-                          quantity as "Qty", low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Electronics' ''')
+                          quantity as "Qty", unit_price as "Unit Price (₹)", (quantity * unit_price) as "Total Value (₹)",
+                          low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Electronics' ''')
     if not df_elec.empty:
         st.dataframe(df_elec, use_container_width=True, hide_index=True)
     else:
@@ -309,7 +314,8 @@ with tab_stock:
     st.subheader("⚙️ Mechanical")
     df_mech = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", 
                           room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", 
-                          quantity as "Qty", low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Mechanical' ''')
+                          quantity as "Qty", unit_price as "Unit Price (₹)", (quantity * unit_price) as "Total Value (₹)",
+                          low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Mechanical' ''')
     if not df_mech.empty:
         st.dataframe(df_mech, use_container_width=True, hide_index=True)
     else:
@@ -363,8 +369,13 @@ with tab_add:
                 st.warning(f"No {add_category} items exist yet. Please register a new item.")
                 selection = None
                 
-        add_qty = st.number_input("Quantity Purchased/Added", min_value=1, step=1)
-        add_project = st.text_input("Project / Reason (e.g., General Stock, GeM Order)")
+        col_qty, col_price = st.columns(2)
+        with col_qty:
+            add_qty = st.number_input("Quantity Purchased/Added", min_value=1, step=1)
+        with col_price:
+            add_price = st.number_input("Unit Price (₹)", min_value=0.0, step=0.5, format="%.2f")
+            
+        add_project = st.text_input("Project / Reason (e.g., GeM Order, Organ Transport Prototype)")
         add_submit = st.form_submit_button("Add to Inventory")
         
         if add_submit:
@@ -393,19 +404,20 @@ with tab_add:
                 df_check = get_data("SELECT quantity FROM inventory WHERE item_code=%s", (final_code,))
                 current_qty = int(df_check.iloc[0]['quantity']) if not df_check.empty else 0
                 new_qty = current_qty + add_qty
+                total_value = add_qty * add_price
                 
-                run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity, low_stock_threshold, image) 
-                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
-                             ON CONFLICT (item_code) DO UPDATE SET quantity=%s''', 
-                          (final_code, final_name, add_category, final_specs, final_r_no, final_r_name, final_rack, new_qty, final_threshold, final_img_bytes, new_qty))
+                run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity, low_stock_threshold, image, unit_price) 
+                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+                             ON CONFLICT (item_code) DO UPDATE SET quantity=%s, unit_price=%s''', 
+                          (final_code, final_name, add_category, final_specs, final_r_no, final_r_name, final_rack, new_qty, final_threshold, final_img_bytes, add_price, new_qty, add_price))
                 
                 timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                 run_query('''INSERT INTO transactions 
-                             (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project) 
-                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                          (timestamp, st.session_state.current_user, add_category, final_code, final_name, final_specs, "IN", add_qty, add_project))
+                             (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project, unit_price, total_value) 
+                             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                          (timestamp, st.session_state.current_user, add_category, final_code, final_name, final_specs, "IN", add_qty, add_project, add_price, total_value))
                 
-                st.success(f"Added {add_qty} x {final_name} ({final_code}). Total: {new_qty}")
+                st.success(f"Added {add_qty} x {final_name} ({final_code}) at ₹{add_price} each. Total Stock: {new_qty}")
                 st.rerun()
             else:
                 st.error("Please provide an Item Code and Name.")
@@ -424,7 +436,7 @@ with tab_take:
         take_selection = st.selectbox("Search by Code, Name, or Location (Type to search/scan):", take_options)
         take_code = take_selection.split(" | ")[0]
         
-        preview_data = get_data("SELECT image, quantity, name, specs FROM inventory WHERE item_code=%s", (take_code,)).iloc[0]
+        preview_data = get_data("SELECT image, quantity, name, specs, unit_price FROM inventory WHERE item_code=%s", (take_code,)).iloc[0]
         
         col1, col2 = st.columns([1, 2])
         with col1:
@@ -449,11 +461,14 @@ with tab_take:
                         new_qty = int(preview_data['quantity']) - take_qty
                         run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
                         
+                        current_price = preview_data['unit_price'] if pd.notna(preview_data['unit_price']) else 0.0
+                        total_out_value = take_qty * current_price
+                        
                         timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                         run_query('''INSERT INTO transactions 
-                                     (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project) 
-                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                                  (timestamp, st.session_state.current_user, take_category, take_code, preview_data['name'], preview_data['specs'], "OUT", take_qty, take_project))
+                                     (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project, unit_price, total_value) 
+                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
+                                  (timestamp, st.session_state.current_user, take_category, take_code, preview_data['name'], preview_data['specs'], "OUT", take_qty, take_project, current_price, total_out_value))
                         
                         st.success(f"Checked out {take_qty} x {preview_data['name']}. Remaining: {new_qty}")
                         st.rerun()
@@ -729,8 +744,8 @@ with tab_history:
                              SPLIT_PART(timestamp, ' ', 2) as "Time (IST)",
                              user_name as "User", 
                              category as "Type", item_code as "Code", item_name as "Component", 
-                             specs as "Specifications", action as "IN/OUT", 
-                             quantity as "Qty", project as "Project" 
+                             action as "IN/OUT", quantity as "Qty", 
+                             unit_price as "Unit Price (₹)", total_value as "Total (₹)", project as "Project" 
                              FROM transactions ORDER BY id DESC''')
     
     st.dataframe(df_history, use_container_width=True, hide_index=True)
