@@ -96,15 +96,39 @@ def init_db():
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Lab Inventory", layout="wide")
-init_db()
 
-# --- STATE MANAGEMENT ---
-if "current_user" not in st.session_state:
-    st.session_state.current_user = None
-if "current_role" not in st.session_state:
-    st.session_state.current_role = None
-if "low_stock_alerted" not in st.session_state:
-    st.session_state.low_stock_alerted = False
+def set_custom_aesthetic():
+    st.markdown(
+        """
+        <style>
+        /* Main background gradient */
+        .stApp {
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            color: #f8fafc;
+        }
+        /* Make the sidebar slightly transparent to blend with the gradient */
+        [data-testid="stSidebar"] {
+            background-color: rgba(15, 23, 42, 0.85) !important;
+        }
+        /* Style the tabs to look more modern */
+        .stTabs [data-baseweb="tab-list"] {
+            background-color: transparent;
+        }
+        .stTabs [data-baseweb="tab"] {
+            background-color: rgba(255, 255, 255, 0.05);
+            border-radius: 4px 4px 0px 0px;
+            margin-right: 5px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+# Call the function to apply the styles
+set_custom_aesthetic()
+
+# Initialize Cloud DB
+init_db()
 
 # --- LOGIN & REGISTRATION SYSTEM ---
 if not st.session_state.current_user:
