@@ -66,6 +66,18 @@ def init_db():
     # 3. User Accounts Table
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (username TEXT PRIMARY KEY, password TEXT, role TEXT, status TEXT)''')
+    
+    # Safely add 'department' column to existing database if it isn't there
+    c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='department'")
+    if not c.fetchone():
+        c.execute("ALTER TABLE users ADD COLUMN department TEXT")
+    
+    # Create the Master Admin account if the table is completely empty
+    c.execute("SELECT COUNT(*) FROM users")
+    if c.fetchone()[0] == 0:
+        admin_hash = hash_password("admin") # Default admin password
+        c.execute("INSERT INTO users (username, password, role, status, department) VALUES (%s, %s, %s, %s, %s)", 
+                  ('admin', admin_hash, 'admin', 'approved', 'Admin'))
 
     # 4. Restock Notes (Messaging System) Table
     c.execute('''CREATE TABLE IF NOT EXISTS restock_notes
@@ -135,6 +147,10 @@ if not st.session_state.current_user:
             new_user = st.text_input("Desired Username").lower().strip()
             new_pass = st.text_input("Create Password", type="password")
             confirm_pass = st.text_input("Confirm Password", type="password")
+            
+            # --- NEW: Department Selection ---
+            new_dept = st.radio("Select Department:", ["Mechanical", "Electronics"], horizontal=True)
+            
             signup_submitted = st.form_submit_button("Request Account")
             
             if signup_submitted:
@@ -147,9 +163,9 @@ if not st.session_state.current_user:
                     if not check_user.empty:
                         st.error("Username already exists. Please choose another.")
                     else:
-                        run_query("INSERT INTO users (username, password, role, status) VALUES (%s, %s, 'user', 'pending')", 
-                                  (new_user, hash_password(new_pass)))
-                        st.success("Access requested successfully! Please wait for Admin approval.")
+                        run_query("INSERT INTO users (username, password, role, status, department) VALUES (%s, %s, 'user', 'pending', %s)", 
+                                  (new_user, hash_password(new_pass), new_dept))
+                        st.success(f"Access requested for the {new_dept} team! Please wait for Admin approval.")
     st.stop()
 
 # --- SIDEBAR: USER SETTINGS & ADMIN PANEL ---
@@ -171,32 +187,55 @@ with st.sidebar:
                     st.success("Password updated!")
                 else:
                     st.error("Current password incorrect.")
-    
+   # 2. Admin Panel (Only visible to admins)
     if st.session_state.current_role == 'admin':
-        with st.expander("👑 Manage Users", expanded=True):
+        with st.expander("👑 Manage Users & Roles", expanded=True):
             st.write("**Pending Approvals**")
-            pending_users = get_data("SELECT username FROM users WHERE status='pending'")
+            # Now pulls department so the admin knows who they are approving
+            pending_users = get_data("SELECT username, department FROM users WHERE status='pending'")
+            
             if pending_users.empty:
                 st.info("No pending requests.")
             else:
                 for idx, row in pending_users.iterrows():
                     col1, col2 = st.columns([2, 1])
-                    col1.write(row['username'])
+                    col1.write(f"**{row['username']}** ({row['department']})")
                     if col2.button("Approve", key=f"app_{row['username']}"):
                         run_query("UPDATE users SET status='approved' WHERE username=%s", (row['username'],))
                         st.rerun()
             
             st.divider()
-            st.write("**Active Users**")
-            active_users = get_data("SELECT username FROM users WHERE status='approved' AND role!='admin'")
+            st.write("**Manage Active Users**")
+            
+            # Pulls everyone EXCEPT the admin who is currently clicking buttons (prevents accidental self-deletion)
+            active_users = get_data("SELECT username, role, department FROM users WHERE status='approved' AND username != %s", (st.session_state.current_user,))
+            
             if not active_users.empty:
-                user_to_delete = st.selectbox("Select User to Remove", active_users['username'].tolist())
-                if st.button("Delete User", type="primary"):
-                    run_query("DELETE FROM users WHERE username=%s", (user_to_delete,))
-                    st.success(f"Removed {user_to_delete}")
-                    st.rerun()
+                # Format dropdown options to show current role and department
+                user_options = [f"{row['username']} | Role: {row['role'].title()} | Dept: {row['department']}" for _, row in active_users.iterrows()]
+                selected_user_str = st.selectbox("Select User to Modify:", user_options)
+                selected_user = selected_user_str.split(" | ")[0]
+                
+                col_mod1, col_mod2, col_mod3 = st.columns(3)
+                
+                # --- NEW: Admin Privilege Controls ---
+                with col_mod1:
+                    if st.button("Make Admin", use_container_width=True):
+                        run_query("UPDATE users SET role='admin' WHERE username=%s", (selected_user,))
+                        st.success(f"Promoted {selected_user}!")
+                        st.rerun()
+                with col_mod2:
+                    if st.button("Make User", use_container_width=True):
+                        run_query("UPDATE users SET role='user' WHERE username=%s", (selected_user,))
+                        st.success(f"Demoted {selected_user}.")
+                        st.rerun()
+                with col_mod3:
+                    if st.button("Delete User", type="primary", use_container_width=True):
+                        run_query("DELETE FROM users WHERE username=%s", (selected_user,))
+                        st.success(f"Removed {selected_user}.")
+                        st.rerun()
             else:
-                st.info("No other active users.")
+                st.info("No other active users to manage.")
                 
     st.divider()
     if st.button("Logout", use_container_width=True):
