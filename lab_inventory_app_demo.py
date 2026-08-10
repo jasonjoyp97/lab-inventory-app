@@ -130,6 +130,19 @@ set_custom_aesthetic()
 # Initialize Cloud DB
 init_db()
 
+# --- STATE MANAGEMENT ---
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+if "current_role" not in st.session_state:
+    st.session_state.current_role = None
+if "low_stock_alerted" not in st.session_state:
+    st.session_state.low_stock_alerted = False
+
+# --- LOGIN & REGISTRATION SYSTEM ---
+if not st.session_state.current_user:
+    st.title("🔬 Lab Inventory Portal")
+# ... rest of your code continues here
+
 # --- LOGIN & REGISTRATION SYSTEM ---
 if not st.session_state.current_user:
     st.title("🔬 Lab Inventory Portal")
