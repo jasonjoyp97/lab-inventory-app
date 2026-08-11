@@ -477,18 +477,20 @@ with tab_take:
                         new_qty = int(preview_data['quantity']) - take_qty
                         run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
                         
-                        current_price = preview_data['unit_price'] if pd.notna(preview_data['unit_price']) else 0.0
-                        total_out_value = take_qty * current_price
+                        # --- FIX: Cast Pandas/NumPy types to native Python floats ---
+                        current_price = float(preview_data['unit_price']) if pd.notna(preview_data['unit_price']) else 0.0
+                        total_out_value = float(take_qty * current_price)
                         
                         timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
                         run_query('''INSERT INTO transactions 
                                      (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project, unit_price, total_value) 
                                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                                  (timestamp, st.session_state.current_user, take_category, take_code, preview_data['name'], preview_data['specs'], "OUT", take_qty, take_project, current_price, total_out_value))
+                                  (timestamp, st.session_state.current_user, take_category, take_code, 
+                                   str(preview_data['name']), str(preview_data['specs']), # Cast strings
+                                   "OUT", int(take_qty), take_project, current_price, total_out_value))
                         
                         st.success(f"Checked out {take_qty} x {preview_data['name']}. Remaining: {new_qty}")
                         st.rerun()
-
 # 4. BOM CHECKOUT TAB
 with tab_bom:
     st.subheader("🛒 Bill of Materials (BOM) Checkout")
