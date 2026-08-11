@@ -796,31 +796,69 @@ with tab_warning:
 # 9. ANALYTICS TAB (ADMIN ONLY)
 if st.session_state.current_role == 'admin':
     with tab_analytics:
-        st.subheader("📊 Financial Analytics & Cost Tracking")
-        st.write("Track capital expenditure across all R&D projects.")
+        # --- Time Logic ---
+        current_date = datetime.now(IST)
+        current_month_filter = current_date.strftime("%Y-%m")
+        current_month_display = current_date.strftime("%B %Y")
         
-        cost_df = get_data("SELECT project as \"Project\", SUM(total_value) as \"Total Cost (₹)\" FROM transactions WHERE action='OUT' GROUP BY project")
+        # Financial Year Logic (April 1 to March 31)
+        if current_date.month >= 4:
+            fy_start_year = current_date.year
+        else:
+            fy_start_year = current_date.year - 1
+            
+        fy_start_str = f"{fy_start_year}-04-01 00:00:00"
+        fy_end_str = f"{fy_start_year + 1}-04-01 00:00:00"
+        fy_display = f"FY {fy_start_year}-{str(fy_start_year + 1)[-2:]}"
+
+        st.subheader(f"📊 Financial Analytics ({current_month_display})")
+        st.write("Track capital expenditure across all R&D projects for the current month and financial year.")
         
-        if not cost_df.empty and cost_df["Total Cost (₹)"].sum() > 0:
+        # 1. Fetch project costs specifically for the current month
+        cost_df = get_data('''SELECT project as "Project", SUM(total_value) as "Total Cost (₹)" 
+                              FROM transactions 
+                              WHERE action='OUT' AND timestamp LIKE %s 
+                              GROUP BY project''', (f"{current_month_filter}%",))
+                              
+        # 2. Fetch the total expenditure for the current Financial Year
+        fy_df = get_data('''SELECT SUM(total_value) as "FY_Total" 
+                            FROM transactions 
+                            WHERE action='OUT' AND timestamp >= %s AND timestamp < %s''', 
+                         (fy_start_str, fy_end_str))
+                         
+        fy_total = fy_df.iloc[0]["FY_Total"] if not fy_df.empty and pd.notna(fy_df.iloc[0]["FY_Total"]) else 0.0
+        
+        if not cost_df.empty: 
+            # Clean up empty project names if any
             cost_df = cost_df[cost_df["Project"] != ""]
             
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                fig = px.pie(cost_df, values='Total Cost (₹)', names='Project', 
-                             title='Capital Expenditure by Project',
-                             hole=0.4, 
-                             color_discrete_sequence=px.colors.sequential.RdBu)
-                             
-                fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="#f8fafc")
-                st.plotly_chart(fig, use_container_width=True)
+                # Only draw the pie chart if there is actual money spent
+                if cost_df["Total Cost (₹)"].sum() > 0:
+                    fig = px.pie(cost_df, values='Total Cost (₹)', names='Project', 
+                                 title=f'Capital Expenditure ({current_month_display})',
+                                 hole=0.4, 
+                                 color_discrete_sequence=px.colors.sequential.RdBu)
+                                 
+                    fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="#f8fafc")
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("📈 The visual pie chart will appear here once items with a Unit Price greater than ₹0 are checked out this month.")
                 
             with col2:
-                st.write("**Cost Breakdown Table**")
+                st.write("**Monthly Cost Breakdown**")
                 st.dataframe(cost_df, hide_index=True, use_container_width=True)
-                st.metric("Total Lab Expenditure", f"₹{cost_df['Total Cost (₹)'].sum():,.2f}")
+                
+                # Display both metrics stacked beautifully
+                st.metric(f"Total Expenditure ({current_month_display})", f"₹{cost_df['Total Cost (₹)'].sum():,.2f}")
+                st.metric(f"Total Expenditure ({fy_display})", f"₹{fy_total:,.2f}")
         else:
-            st.info("No project expenditure data available yet. Start checking out items to generate analytics.")
+            st.info(f"No project expenditure data logged for {current_month_display} yet. Start checking out items to generate analytics.")
+            # Even if no monthly data, still show the FY total if it exists
+            if fy_total > 0:
+                st.metric(f"Total Expenditure ({fy_display})", f"₹{fy_total:,.2f}")
 
 # 10. HISTORY LOG TAB
 with tab_history:
