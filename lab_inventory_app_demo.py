@@ -9,7 +9,6 @@ import urllib.request
 from PIL import Image, ImageDraw, ImageFont
 import hashlib
 import plotly.express as px
-import re
 
 # --- TIMEZONE SETUP ---
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -330,9 +329,25 @@ with tab_add:
     
     with st.form("add_form", clear_on_submit=True):
         if add_type == "Register Brand New Item":
+            
+            # --- NEW: AUTO-GENERATE ITEM CODE ---
+            prefix = "ELEC-" if add_category == "Electronics" else "MECH-"
+            df_codes = get_data("SELECT item_code FROM inventory WHERE item_code LIKE %s", (f"{prefix}%",))
+            
+            if df_codes.empty:
+                next_num = 1
+            else:
+                # Extract the numbers from existing codes and find the highest one
+                nums = [int(code.split('-')[1]) for code in df_codes['item_code'] if '-' in code and code.split('-')[1].isdigit()]
+                next_num = max(nums) + 1 if nums else 1
+                
+            auto_code = f"{prefix}{next_num:03d}"
+            # ------------------------------------
+
             col1, col2 = st.columns(2)
             with col1:
-                input_code = st.text_input("Create Item Code (e.g., ELEC-005, MECH-102)").strip().upper()
+                # The field is now disabled so users can see it but cannot edit it
+                input_code = st.text_input("Item Code (Auto-Generated)", value=auto_code, disabled=True)
                 input_name = st.text_input("Component Name (e.g., Capacitor, Allen Bolt)").strip().title()
             with col2:
                 if add_category == "Electronics":
@@ -380,18 +395,12 @@ with tab_add:
         
         if add_submit:
             if add_type == "Register Brand New Item":
-                # --- NEW: Naming Convention Validation ---
-                valid_format = r'^(ELEC|MECH)-\d{3}$'
-                if not re.match(valid_format, input_code):
-                    st.error("⚠️ Invalid Item Code format! Codes must use the prefix 'ELEC-' or 'MECH-' followed by exactly 3 numbers (e.g., ELEC-005, MECH-102).")
-                    st.stop()
-                # -----------------------------------------
-                
                 final_specs = input_specs
                 if mounting_type != "None":
                     final_specs = f"{input_specs} [{mounting_type}]" if input_specs else f"[{mounting_type}]"
                 
-                final_code, final_name = input_code, input_name
+                final_code = auto_code 
+                final_name = input_name
                 final_r_no, final_r_name, final_rack = input_room_no, input_room_name, input_rack_no
                 final_threshold = input_threshold
                 final_img_bytes = input_image.getvalue() if input_image is not None else None
