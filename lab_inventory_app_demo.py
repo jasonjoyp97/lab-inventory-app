@@ -9,6 +9,7 @@ import urllib.request
 from PIL import Image, ImageDraw, ImageFont
 import hashlib
 import plotly.express as px
+import re
 
 # --- TIMEZONE SETUP ---
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -331,7 +332,7 @@ with tab_add:
         if add_type == "Register Brand New Item":
             col1, col2 = st.columns(2)
             with col1:
-                input_code = st.text_input("Create Item Code (e.g., ELEC-05, MECH-12)").strip().upper()
+                input_code = st.text_input("Create Item Code (e.g., ELEC-005, MECH-102)").strip().upper()
                 input_name = st.text_input("Component Name (e.g., Capacitor, Allen Bolt)").strip().title()
             with col2:
                 if add_category == "Electronics":
@@ -379,6 +380,13 @@ with tab_add:
         
         if add_submit:
             if add_type == "Register Brand New Item":
+                # --- NEW: Naming Convention Validation ---
+                valid_format = r'^(ELEC|MECH)-\d{3}$'
+                if not re.match(valid_format, input_code):
+                    st.error("⚠️ Invalid Item Code format! Codes must use the prefix 'ELEC-' or 'MECH-' followed by exactly 3 numbers (e.g., ELEC-005, MECH-102).")
+                    st.stop()
+                # -----------------------------------------
+                
                 final_specs = input_specs
                 if mounting_type != "None":
                     final_specs = f"{input_specs} [{mounting_type}]" if input_specs else f"[{mounting_type}]"
@@ -472,13 +480,12 @@ with tab_take:
                         st.success(f"Checked out {take_qty} x {preview_data['name']}. Remaining: {new_qty}")
                         st.rerun()
 
-# 4. NEW: BOM CHECKOUT TAB
+# 4. BOM CHECKOUT TAB
 with tab_bom:
     st.subheader("🛒 Bill of Materials (BOM) Checkout")
     st.write("Upload a CSV file to check out multiple components simultaneously for a large prototype build.")
     
-    # Provide a downloadable template for the user
-    template_df = pd.DataFrame({"Item Code": ["ELEC-01", "MECH-02"], "Quantity Needed": [5, 12]})
+    template_df = pd.DataFrame({"Item Code": ["ELEC-001", "MECH-002"], "Quantity Needed": [5, 12]})
     st.download_button("📄 Download CSV Template", template_df.to_csv(index=False).encode('utf-8'), "BOM_Template.csv", "text/csv")
     
     uploaded_bom = st.file_uploader("Upload BOM (CSV)", type=['csv'])
@@ -486,7 +493,6 @@ with tab_bom:
     if uploaded_bom is not None:
         bom_df = pd.read_csv(uploaded_bom)
         
-        # Validation check for proper columns
         if "Item Code" not in bom_df.columns or "Quantity Needed" not in bom_df.columns:
             st.error("Invalid CSV format. Please ensure columns are named 'Item Code' and 'Quantity Needed'.")
         else:
@@ -504,7 +510,6 @@ with tab_bom:
                         success_count = 0
                         errors = []
                         
-                        # Loop through the CSV and process each item
                         for idx, row in bom_df.iterrows():
                             code = str(row['Item Code']).strip()
                             try:
@@ -513,7 +518,6 @@ with tab_bom:
                                 errors.append(f"❌ Invalid quantity for {code}.")
                                 continue
                                 
-                            # Check stock
                             item_data = get_data("SELECT name, specs, quantity, unit_price, category FROM inventory WHERE item_code=%s", (code,))
                             
                             if item_data.empty:
@@ -525,7 +529,6 @@ with tab_bom:
                                 errors.append(f"⚠️ Insufficient stock for {code} ({item_data.iloc[0]['name']}). Need {qty_needed}, but only have {current_qty}.")
                                 continue
                                 
-                            # If checks pass, deduct stock and log transaction
                             new_qty = current_qty - qty_needed
                             unit_price = float(item_data.iloc[0]['unit_price']) if pd.notna(item_data.iloc[0]['unit_price']) else 0.0
                             total_val = qty_needed * unit_price
@@ -779,29 +782,25 @@ with tab_warning:
         else:
             st.info("Stock levels are healthy. No items require coordination.")
 
-# 9. NEW: ANALYTICS TAB (ADMIN ONLY)
+# 9. ANALYTICS TAB (ADMIN ONLY)
 if st.session_state.current_role == 'admin':
     with tab_analytics:
         st.subheader("📊 Financial Analytics & Cost Tracking")
         st.write("Track capital expenditure across all R&D projects.")
         
-        # Fetch project costs (Action = OUT means items were consumed for a project)
         cost_df = get_data("SELECT project as \"Project\", SUM(total_value) as \"Total Cost (₹)\" FROM transactions WHERE action='OUT' GROUP BY project")
         
         if not cost_df.empty and cost_df["Total Cost (₹)"].sum() > 0:
-            # Clean up empty project names if any
             cost_df = cost_df[cost_df["Project"] != ""]
             
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                # Generate a sleek Plotly donut chart
                 fig = px.pie(cost_df, values='Total Cost (₹)', names='Project', 
                              title='Capital Expenditure by Project',
                              hole=0.4, 
                              color_discrete_sequence=px.colors.sequential.RdBu)
                              
-                # Set the background to transparent to perfectly match the CSS gradient
                 fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="#f8fafc")
                 st.plotly_chart(fig, use_container_width=True)
                 
