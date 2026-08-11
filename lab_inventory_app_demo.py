@@ -286,10 +286,15 @@ if not st.session_state.low_stock_alerted:
 # --- MAIN DASHBOARD ---
 st.title("🔬 Lab Inventory Management")
 
-# Note the two new tabs added to this array
-tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "📜 History"
-])
+# Dynamically generate tabs based on the user's role
+if st.session_state.current_role == 'admin':
+    tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_history = st.tabs([
+        "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "📜 History"
+    ])
+else:
+    tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_history = st.tabs([
+        "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📜 History"
+    ])
 
 # 1. VIEW STOCK TAB
 with tab_stock:
