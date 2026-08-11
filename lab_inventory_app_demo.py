@@ -780,10 +780,9 @@ with tab_warning:
             st.info("Stock levels are healthy. No items require coordination.")
 
 # 9. NEW: ANALYTICS TAB (ADMIN ONLY)
-with tab_analytics:
-    st.subheader("📊 Financial Analytics & Cost Tracking")
-    
-    if st.session_state.current_role == 'admin':
+if st.session_state.current_role == 'admin':
+    with tab_analytics:
+        st.subheader("📊 Financial Analytics & Cost Tracking")
         st.write("Track capital expenditure across all R&D projects.")
         
         # Fetch project costs (Action = OUT means items were consumed for a project)
@@ -812,8 +811,6 @@ with tab_analytics:
                 st.metric("Total Lab Expenditure", f"₹{cost_df['Total Cost (₹)'].sum():,.2f}")
         else:
             st.info("No project expenditure data available yet. Start checking out items to generate analytics.")
-    else:
-        st.warning("🔒 Financial analytics and capital expenditure tracking are restricted to Admin accounts only.")
 
 # 10. HISTORY LOG TAB
 with tab_history:
