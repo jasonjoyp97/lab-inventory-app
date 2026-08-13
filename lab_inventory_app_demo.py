@@ -511,12 +511,12 @@ with tab_bom:
             st.dataframe(bom_df, hide_index=True)
             
             with st.form("bom_checkout_form"):
-                bom_project = st.text_input("Project Name (e.g., Organ Transport Prototype v2)")
+                bom_project = st.text_input("Project Number (e.g., P 8273)")
                 bom_submit = st.form_submit_button("Process BOM Checkout")
                 
                 if bom_submit:
                     if not bom_project:
-                        st.error("Project Name is required to process the BOM.")
+                        st.error("Project Number is required to process the BOM.")
                     else:
                         success_count = 0
                         errors = []
