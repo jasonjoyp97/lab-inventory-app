@@ -467,12 +467,12 @@ with tab_take:
             
             with st.form("take_form", clear_on_submit=True):
                 take_qty = st.number_input("Quantity Needed", min_value=1, max_value=int(preview_data['quantity']), step=1)
-                take_project = st.text_input("Project Name (Required, e.g., Organ Transport Prototype)")
+                take_project = st.text_input("Project Number (Required, e.g., P 8215)")
                 take_submit = st.form_submit_button("Check Out")
                 
                 if take_submit:
                     if not take_project:
-                        st.error("Please specify a project.")
+                        st.error("Please specify a project no.")
                     else:
                         new_qty = int(preview_data['quantity']) - take_qty
                         run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
