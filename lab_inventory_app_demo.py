@@ -302,7 +302,7 @@ if not st.session_state.low_stock_alerted:
     st.session_state.low_stock_alerted = True
 
 # --- MAIN DASHBOARD ---
-st.title("🔬 Lab Inventory Management")
+st.title("🔬 ECD Inventory Management")
 
 # Generate all 10 tabs for every user so the UI remains consistent
 tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_history = st.tabs([
@@ -467,7 +467,8 @@ with tab_add:
                         success_count = 0
                         
                         # Find the current highest ELEC code so we don't overwrite anything
-                        df_codes = get_data("SELECT item_code FROM inventory WHERE item_code LIKE 'ELEC-%'")
+                        # FIX: Pass the wildcard securely so psycopg2 doesn't confuse the % sign for a parameter
+                        df_codes = get_data("SELECT item_code FROM inventory WHERE item_code LIKE %s", ('ELEC-%',))
                         if df_codes.empty:
                             next_num = 1
                         else:
