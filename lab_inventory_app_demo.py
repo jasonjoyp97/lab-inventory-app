@@ -447,6 +447,81 @@ with tab_add:
                 st.rerun()
             else:
                 st.error("Please provide an Item Code and Name.")
+                
+    # --- ADMIN EXCEL UPLOAD FEATURE ---
+    if st.session_state.current_role == 'admin':
+        st.divider()
+        with st.expander("📁 Admin Bulk Upload (Excel)"):
+            st.write("Upload the **ELECTRONICS AND MECHANICAL INVENTORY ECD.xlsx** file to instantly bulk-import the Electronics database.")
+            uploaded_file = st.file_uploader("Upload Excel Document", type=['xlsx'])
+            
+            if uploaded_file is not None:
+                if st.button("Process Bulk Upload"):
+                    try:
+                        # Parse the specific sheet, skipping the first 3 rows which contain titles/blank space
+                        df_upload = pd.read_excel(uploaded_file, sheet_name='Electronics Inventory', skiprows=3)
+                        
+                        # Remove empty rows
+                        df_upload = df_upload.dropna(subset=['Component'])
+                        
+                        success_count = 0
+                        
+                        # Find the current highest ELEC code so we don't overwrite anything
+                        df_codes = get_data("SELECT item_code FROM inventory WHERE item_code LIKE 'ELEC-%'")
+                        if df_codes.empty:
+                            next_num = 1
+                        else:
+                            nums = [int(code.split('-')[1]) for code in df_codes['item_code'] if '-' in code and code.split('-')[1].isdigit()]
+                            next_num = max(nums) + 1 if nums else 1
+                            
+                        for idx, row in df_upload.iterrows():
+                            comp_name = str(row['Component']).strip().title()
+                            
+                            type_val = str(row['Type']).strip() if pd.notna(row['Type']) else ""
+                            spec_val = str(row['Value']).strip() if pd.notna(row['Value']) else ""
+                            
+                            # Safely extract integers from stock fields that contain text (e.g., '300 Mtr', '0.426g')
+                            raw_stock = row['Stock']
+                            stock_qty = 0
+                            extra_spec = ""
+                            
+                            if pd.notna(raw_stock):
+                                stock_str = str(raw_stock).strip()
+                                match = re.search(r'^(\d+)', stock_str)
+                                if match:
+                                    stock_qty = int(match.group(1))
+                                # If the stock contains letters (like 'Mtr' or 'g'), save that information in the specs
+                                if not isinstance(raw_stock, (int, float)) and not stock_str.isdigit():
+                                    extra_spec = f" [Raw Stock: {stock_str}]"
+                                    
+                            final_specs = f"{type_val} {spec_val}".strip() + extra_spec
+                            
+                            # Format location data
+                            rack_val = str(row['Rack']).strip() if pd.notna(row['Rack']) else ""
+                            bin_val = str(row['Bin']).strip() if pd.notna(row['Bin']) else ""
+                            comp_val = str(row['Compartment']).strip() if pd.notna(row['Compartment']) else ""
+                            
+                            loc_parts = []
+                            if rack_val and rack_val != "nan": loc_parts.append(rack_val)
+                            if bin_val and bin_val != "nan": loc_parts.append(f"Bin {bin_val.replace('.0', '')}")
+                            if comp_val and comp_val != "nan": loc_parts.append(f"Comp {comp_val.replace('.0', '')}")
+                            final_rack = " | ".join(loc_parts)
+                            
+                            new_code = f"ELEC-{next_num:03d}"
+                            
+                            run_query('''INSERT INTO inventory (item_code, name, category, specs, room_no, room_name, rack_no, quantity, low_stock_threshold, unit_price) 
+                                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+                                         ON CONFLICT (item_code) DO NOTHING''', 
+                                      (new_code, comp_name, "Electronics", final_specs, "", "ECD Lab", final_rack, stock_qty, 10, 0.0))
+                                      
+                            next_num += 1
+                            success_count += 1
+                            
+                        st.success(f"✅ Successfully uploaded and registered {success_count} electronics components!")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"⚠️ Error processing the Excel file. Please ensure it matches the original format. Details: {e}")
 
 # 3. TAKE ITEMS TAB
 with tab_take:
