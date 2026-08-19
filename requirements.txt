@@ -6,3 +6,4 @@ pymysql
 qrcode
 pillow
 plotly==5.20.0
+openpyxl
