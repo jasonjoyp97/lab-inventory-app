@@ -10,7 +10,8 @@ from PIL import Image, ImageDraw, ImageFont
 import hashlib
 import plotly.express as px
 import re
-
+import numpy as np 
+from streamlit_drawable_canvas import st_canvas 
 # --- TIMEZONE SETUP ---
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -285,6 +286,56 @@ with st.sidebar:
                         st.rerun()
             else:
                 st.info("No other active users to manage.")
+
+        with st.expander("🗺️ Interactive Floor Plan Creator", expanded=False):
+            st.write("Draw your lab layout. Use the tools to draw walls, place racks (rectangles), and add text. Click **Save** when finished.")
+            
+            new_floor_name = st.text_input("Room/Floor Name (e.g., 'ECD Lab', '2nd Floor')").strip().title()
+            
+            # Interactive Canvas Toolbar
+            col_tool1, col_tool2 = st.columns(2)
+            with col_tool1:
+                drawing_mode = st.selectbox("Tool:", ("rect", "line", "freedraw", "transform", "polygon"))
+            with col_tool2:
+                stroke_color = st.color_picker("Color (Walls/Racks):", "#FF4B4B")
+            
+            # The actual drawing canvas
+            canvas_result = st_canvas(
+                fill_color="rgba(255, 75, 75, 0.3)",  # Slightly transparent fill for racks
+                stroke_width=3,
+                stroke_color=stroke_color,
+                background_color="#1E1E2E",          # Matches the custom dark theme
+                update_streamlit=True,
+                height=350,
+                width=350,                           # Constrained width to fit within the sidebar cleanly
+                drawing_mode=drawing_mode,
+                key="floor_plan_canvas",
+            )
+            
+            if st.button("Save Floor Plan to Database", use_container_width=True):
+                if new_floor_name:
+                    if canvas_result.image_data is not None:
+                        # Convert the drawn canvas (NumPy array) into a standard PNG image
+                        img_array = canvas_result.image_data
+                        img_pil = Image.fromarray(img_array.astype('uint8'), 'RGBA')
+                        
+                        # Save the PIL image to a byte buffer
+                        buf = io.BytesIO()
+                        img_pil.save(buf, format="PNG")
+                        img_bytes = buf.getvalue()
+                        
+                        # Save to PostgreSQL
+                        run_query("INSERT INTO floor_plans (floor_name, image) VALUES (%s, %s) ON CONFLICT (floor_name) DO UPDATE SET image=%s", 
+                                  (new_floor_name, img_bytes, img_bytes))
+                        st.success(f"Successfully saved interactive blueprint for {new_floor_name}!")
+                    else:
+                        st.error("Canvas is empty. Please draw the layout first.")
+                else:
+                    st.error("Please provide a Room/Floor Name.")
+            
+            existing_maps = get_data("SELECT floor_name FROM floor_plans")
+            if not existing_maps.empty:
+                st.write("**Active Custom Maps:**", ", ".join(existing_maps['floor_name'].tolist()))
                 
     st.divider()
     if st.button("Logout", use_container_width=True):
