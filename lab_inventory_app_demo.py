@@ -11,8 +11,6 @@ import hashlib
 import plotly.express as px
 import re
 import base64
-import numpy as np
-from streamlit_drawable_canvas import st_canvas
 
 # --- TIMEZONE SETUP ---
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -92,14 +90,14 @@ def init_db():
         c.execute("ALTER TABLE transactions ADD COLUMN unit_price REAL DEFAULT 0.0")
         c.execute("ALTER TABLE transactions ADD COLUMN total_value REAL DEFAULT 0.0")
         
-    # 6. Floor Plans Table for the Interactive Canvas & Uploads
+    # 6. Floor Plans Table
     c.execute('''CREATE TABLE IF NOT EXISTS floor_plans
                  (floor_name TEXT PRIMARY KEY, image BYTEA)''')
     
     # Create the Master Admin account if the table is completely empty
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
-        admin_hash = hash_password("admin") # Default admin password
+        admin_hash = hash_password("admin")
         c.execute("INSERT INTO users (username, password, role, status, department) VALUES (%s, %s, %s, %s, %s)", 
                   ('admin', admin_hash, 'admin', 'approved', 'Admin'))
         
@@ -113,7 +111,7 @@ def set_custom_aesthetic():
     st.markdown(
         """
         <style>
-        /* Main background - Softer dark slate for eye comfort */
+        /* Main background */
         .stApp {
             background-color: #0E1117;
             color: #FAFAFA;
@@ -122,7 +120,7 @@ def set_custom_aesthetic():
         [data-testid="stSidebar"] {
             background-color: #262730 !important;
         }
-        /* Make tabs highly visible and readable */
+        /* Tab list container */
         .stTabs [data-baseweb="tab-list"] {
             gap: 4px;
             background-color: transparent;
@@ -136,12 +134,12 @@ def set_custom_aesthetic():
             border: 1px solid #333;
             border-bottom: none;
         }
-        /* Hover effect for inactive tabs */
+        /* Hover effect */
         .stTabs [data-baseweb="tab"]:hover {
             color: #FFFFFF;
             background-color: #2D2D44;
         }
-        /* Active Tab Styling - Bright and bold */
+        /* Active Tab Styling */
         .stTabs [aria-selected="true"] {
             background-color: #3B3B58 !important;
             color: #FFFFFF !important;
@@ -153,10 +151,7 @@ def set_custom_aesthetic():
         unsafe_allow_html=True
     )
 
-# Call the function to apply the styles
 set_custom_aesthetic()
-
-# Initialize Cloud DB explicitly to ensure all tables exist
 init_db()
 
 # --- STATE MANAGEMENT ---
@@ -311,7 +306,6 @@ if not st.session_state.low_stock_alerted:
 # --- MAIN DASHBOARD ---
 st.title("🔬 Lab Inventory Management")
 
-# Generate all 11 tabs for every user so the UI remains consistent
 tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_floorplan, tab_history = st.tabs([
     "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
 ])
@@ -349,8 +343,6 @@ with tab_add:
     
     with st.form("add_form", clear_on_submit=True):
         if add_type == "Register Brand New Item":
-            
-            # --- AUTO-GENERATE ITEM CODE ---
             prefix = "ELEC-" if add_category == "Electronics" else "MECH-"
             df_codes = get_data("SELECT item_code FROM inventory WHERE item_code LIKE %s", (f"{prefix}%",))
             
@@ -388,7 +380,6 @@ with tab_add:
                 input_rack_no = st.text_input("Rack/Shelf Number").strip()
                 
             input_image = st.file_uploader("Upload Component Picture (Optional)", type=['png', 'jpg', 'jpeg'])
-                
             selection = None
         else:
             existing_items_df = get_data("SELECT item_code, name, specs, room_no, rack_no, low_stock_threshold FROM inventory WHERE category=%s", (add_category,))
@@ -479,7 +470,6 @@ with tab_add:
                             
                         for idx, row in df_upload.iterrows():
                             comp_name = str(row['Component']).strip().title()
-                            
                             type_val = str(row['Type']).strip() if pd.notna(row['Type']) else ""
                             spec_val = str(row['Value']).strip() if pd.notna(row['Value']) else ""
                             
@@ -521,7 +511,7 @@ with tab_add:
                         st.rerun()
                         
                     except Exception as e:
-                        st.error(f"⚠️ Error processing the Excel file. Please ensure it matches the original format. Details: {e}")
+                        st.error(f"⚠️ Error processing the Excel file. Details: {e}")
 
 # 3. TAKE ITEMS TAB
 with tab_take:
@@ -708,7 +698,6 @@ with tab_find:
     search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
     
     # --- LAB COORDINATE MAPPING (X%, Y%) ---
-    # Coordinates mapped to the Custom Draw.io ECD layout
     rack_coordinates = {
         "BLOOD PUMPS LAB": {"x": 23, "y": 47},
         "CARDIAC DEVICES LAB": {"x": 29, "y": 47},
@@ -1027,70 +1016,39 @@ with tab_analytics:
 
 # 10. FLOOR PLANS TAB (ADMIN ONLY)
 with tab_floorplan:
-    st.subheader("🗺️ Interactive Floor Plan Creator")
+    st.subheader("🗺️ Lab Floor Plan Manager")
     
     if st.session_state.current_role == 'admin':
-        st.write("Draw a new layout, or upload an existing floor plan (PNG/JPG).")
+        with st.container(border=True):
+            st.markdown(
+                """
+                ### 📐 Design Your Lab Blueprint
+                To create a clean floor plan for your lab:
+                1. Open **[Diagrams.net (Draw.io)](https://app.diagrams.net/)** to draw your rooms, doors, and storage racks.
+                2. Export your finished diagram (**File** $\\rightarrow$ **Export as** $\\rightarrow$ **PNG/JPEG**).
+                3. Upload the exported file below and assign it to a Room/Floor name.
+                """
+            )
+            st.link_button("🌐 Open Diagrams.net (Draw.io)", "https://app.diagrams.net/", use_container_width=False)
         
-        new_floor_name = st.text_input("Room/Floor Name (e.g., 'ECD Lab', '2nd Floor')").strip().title()
+        st.divider()
+        st.write("**Upload Floor Plan Image**")
+        new_floor_name = st.text_input("Room / Floor Name (e.g., 'ECD Division', '2nd Floor')").strip().title()
+        uploaded_map = st.file_uploader("Upload Blueprint (PNG/JPG)", type=['png', 'jpg', 'jpeg'])
         
-        # --- Image Upload Option ---
-        uploaded_map = st.file_uploader("Upload Draw.io / CAD Floor Plan", type=['png', 'jpg', 'jpeg'])
-        if uploaded_map is not None and st.button("Save Uploaded Map to Database", type="primary"):
+        if uploaded_map is not None and st.button("Save Floor Plan to Database", type="primary", use_container_width=True):
             if new_floor_name:
                 img_bytes = uploaded_map.getvalue()
                 run_query("INSERT INTO floor_plans (floor_name, image) VALUES (%s, %s) ON CONFLICT (floor_name) DO UPDATE SET image=%s", 
                           (new_floor_name, img_bytes, img_bytes))
-                st.success(f"Successfully saved uploaded blueprint for {new_floor_name}!")
+                st.success(f"✅ Successfully saved blueprint for {new_floor_name}!")
+                st.rerun()
             else:
-                st.error("Please provide a Room/Floor Name.")
+                st.error("Please specify a Room/Floor Name.")
                 
-        st.divider()
-        st.write("**Or draw a layout manually:**")
-        
-        # Interactive Canvas Toolbar
-        col_tool1, col_tool2 = st.columns(2)
-        with col_tool1:
-            drawing_mode = st.selectbox("Tool:", ("rect", "line", "freedraw", "transform", "polygon"))
-        with col_tool2:
-            stroke_color = st.color_picker("Color (Walls/Racks):", "#FF4B4B")
-        
-        # Full-Screen drawing canvas
-        with st.container(border=True):
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 75, 75, 0.3)", 
-                stroke_width=3,
-                stroke_color=stroke_color,
-                background_color="#2D2D44",          
-                update_streamlit=True,
-                height=600,
-                width=900,
-                drawing_mode=drawing_mode,
-                key="floor_plan_canvas_main",
-            )
-        
-        if st.button("Save Floor Plan to Database", use_container_width=True):
-            if new_floor_name:
-                if canvas_result.image_data is not None:
-                    img_array = canvas_result.image_data
-                    img_pil = Image.fromarray(img_array.astype('uint8'), 'RGBA')
-                    
-                    buf = io.BytesIO()
-                    img_pil.save(buf, format="PNG")
-                    img_bytes = buf.getvalue()
-                    
-                    run_query("INSERT INTO floor_plans (floor_name, image) VALUES (%s, %s) ON CONFLICT (floor_name) DO UPDATE SET image=%s", 
-                              (new_floor_name, img_bytes, img_bytes))
-                    st.success(f"Successfully saved interactive blueprint for {new_floor_name}!")
-                else:
-                    st.error("Canvas is empty. Please draw the layout first.")
-            else:
-                st.error("Please provide a Room/Floor Name.")
-        
         existing_maps = get_data("SELECT floor_name FROM floor_plans")
         if not existing_maps.empty:
             st.write("**Active Custom Maps:**", ", ".join(existing_maps['floor_name'].tolist()))
-    
     else:
         st.warning("🔒 **Access Denied:** Floor plan management is restricted to Admin accounts only.")
 
