@@ -92,7 +92,7 @@ def init_db():
         c.execute("ALTER TABLE transactions ADD COLUMN unit_price REAL DEFAULT 0.0")
         c.execute("ALTER TABLE transactions ADD COLUMN total_value REAL DEFAULT 0.0")
         
-    # 6. Floor Plans Table for the Interactive Canvas
+    # 6. Floor Plans Table for the Interactive Canvas & Uploads
     c.execute('''CREATE TABLE IF NOT EXISTS floor_plans
                  (floor_name TEXT PRIMARY KEY, image BYTEA)''')
     
@@ -193,7 +193,7 @@ if not st.session_state.current_user:
                             if status == 'approved':
                                 st.session_state.current_user = username
                                 st.session_state.current_role = role
-                                st.session_state.low_stock_alerted = False # Reset alert trigger for new login
+                                st.session_state.low_stock_alerted = False
                                 st.rerun()
                             else:
                                 st.warning("Your account is pending approval from the Admin.")
@@ -470,7 +470,6 @@ with tab_add:
                         
                         success_count = 0
                         
-                        # Find the current highest ELEC code so we don't overwrite anything
                         df_codes = get_data("SELECT item_code FROM inventory WHERE item_code LIKE %s", ('ELEC-%',))
                         if df_codes.empty:
                             next_num = 1
@@ -563,7 +562,6 @@ with tab_take:
                         new_qty = int(preview_data['quantity']) - take_qty
                         run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
                         
-                        # Cast Pandas/NumPy types to native Python floats/ints
                         current_price = float(preview_data['unit_price']) if pd.notna(preview_data['unit_price']) else 0.0
                         total_out_value = float(take_qty * current_price)
                         
@@ -709,12 +707,20 @@ with tab_find:
     st.subheader("🔍 Find Component Location")
     search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
     
-    # Adjust these percentages based on where your racks actually are on your uploaded blueprints.
+    # --- LAB COORDINATE MAPPING (X%, Y%) ---
+    # Coordinates mapped to the Custom Draw.io ECD layout
     rack_coordinates = {
-        "RACK 1": {"x": 20, "y": 30},
-        "RACK 2": {"x": 20, "y": 70},
-        "RACK 3": {"x": 80, "y": 30},
-        "RACK 4": {"x": 80, "y": 70},
+        "BLOOD PUMPS LAB": {"x": 23, "y": 47},
+        "CARDIAC DEVICES LAB": {"x": 29, "y": 47},
+        "ESL": {"x": 35, "y": 47},
+        "IFVL": {"x": 40, "y": 47},
+        "CCF": {"x": 59, "y": 47},
+        "PROTOTYPING FACILITY": {"x": 70, "y": 47},
+        "POLISHING FACILITY": {"x": 76, "y": 47},
+        "MPL STORE": {"x": 69, "y": 56},
+        "STORE": {"x": 73, "y": 56},
+        "TRC": {"x": 64, "y": 56},
+        "CABIN": {"x": 52, "y": 56}, 
         "DEFAULT": {"x": 50, "y": 50} 
     }
     
@@ -792,7 +798,6 @@ with tab_find:
                         
                         coords = rack_coordinates.get(target_rack, rack_coordinates["DEFAULT"])
                         
-                        # Fetch the specific floor plan from the DB
                         floor_df = get_data("SELECT image FROM floor_plans WHERE floor_name=%s", (target_room,))
                         
                         if not floor_df.empty and floor_df.iloc[0]['image'] is not None:
@@ -964,7 +969,6 @@ with tab_analytics:
     st.subheader("📊 Financial Analytics & Cost Tracking")
     
     if st.session_state.current_role == 'admin':
-        # --- Time Logic ---
         current_date = datetime.now(IST)
         current_month_filter = current_date.strftime("%Y-%m")
         current_month_display = current_date.strftime("%B %Y")
@@ -1026,9 +1030,23 @@ with tab_floorplan:
     st.subheader("🗺️ Interactive Floor Plan Creator")
     
     if st.session_state.current_role == 'admin':
-        st.write("Draw your lab layout. Use the tools to draw walls, place racks (rectangles), and add text. Click **Save** when finished.")
+        st.write("Draw a new layout, or upload an existing floor plan (PNG/JPG).")
         
         new_floor_name = st.text_input("Room/Floor Name (e.g., 'ECD Lab', '2nd Floor')").strip().title()
+        
+        # --- Image Upload Option ---
+        uploaded_map = st.file_uploader("Upload Draw.io / CAD Floor Plan", type=['png', 'jpg', 'jpeg'])
+        if uploaded_map is not None and st.button("Save Uploaded Map to Database", type="primary"):
+            if new_floor_name:
+                img_bytes = uploaded_map.getvalue()
+                run_query("INSERT INTO floor_plans (floor_name, image) VALUES (%s, %s) ON CONFLICT (floor_name) DO UPDATE SET image=%s", 
+                          (new_floor_name, img_bytes, img_bytes))
+                st.success(f"Successfully saved uploaded blueprint for {new_floor_name}!")
+            else:
+                st.error("Please provide a Room/Floor Name.")
+                
+        st.divider()
+        st.write("**Or draw a layout manually:**")
         
         # Interactive Canvas Toolbar
         col_tool1, col_tool2 = st.columns(2)
@@ -1051,7 +1069,7 @@ with tab_floorplan:
                 key="floor_plan_canvas_main",
             )
         
-        if st.button("Save Floor Plan to Database", use_container_width=True, type="primary"):
+        if st.button("Save Floor Plan to Database", use_container_width=True):
             if new_floor_name:
                 if canvas_result.image_data is not None:
                     img_array = canvas_result.image_data
