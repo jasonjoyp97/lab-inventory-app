@@ -10,8 +10,10 @@ from PIL import Image, ImageDraw, ImageFont
 import hashlib
 import plotly.express as px
 import re
-import numpy as np 
-from streamlit_drawable_canvas import st_canvas 
+import base64
+import numpy as np
+from streamlit_drawable_canvas import st_canvas
+
 # --- TIMEZONE SETUP ---
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -90,7 +92,7 @@ def init_db():
         c.execute("ALTER TABLE transactions ADD COLUMN unit_price REAL DEFAULT 0.0")
         c.execute("ALTER TABLE transactions ADD COLUMN total_value REAL DEFAULT 0.0")
         
-    # 6. NEW: Floor Plans Table for the Interactive Canvas
+    # 6. Floor Plans Table for the Interactive Canvas
     c.execute('''CREATE TABLE IF NOT EXISTS floor_plans
                  (floor_name TEXT PRIMARY KEY, image BYTEA)''')
     
@@ -154,7 +156,7 @@ def set_custom_aesthetic():
 # Call the function to apply the styles
 set_custom_aesthetic()
 
-# Initialize Cloud DB
+# Initialize Cloud DB explicitly to ensure all tables exist
 init_db()
 
 # --- STATE MANAGEMENT ---
@@ -167,7 +169,7 @@ if "low_stock_alerted" not in st.session_state:
 
 # --- LOGIN & REGISTRATION SYSTEM ---
 if not st.session_state.current_user:
-    st.title("🔬 ECD Inventory Portal")
+    st.title("🔬 Lab Inventory Portal")
     
     tab_login, tab_signup = st.tabs(["🔒 Login", "📝 Request Access"])
     
@@ -290,56 +292,6 @@ with st.sidebar:
                         st.rerun()
             else:
                 st.info("No other active users to manage.")
-
-        with st.expander("🗺️ Interactive Floor Plan Creator", expanded=False):
-            st.write("Draw your lab layout. Use the tools to draw walls, place racks (rectangles), and add text. Click **Save** when finished.")
-            
-            new_floor_name = st.text_input("Room/Floor Name (e.g., 'ECD Lab', '2nd Floor')").strip().title()
-            
-            # Interactive Canvas Toolbar
-            col_tool1, col_tool2 = st.columns(2)
-            with col_tool1:
-                drawing_mode = st.selectbox("Tool:", ("rect", "line", "freedraw", "transform", "polygon"))
-            with col_tool2:
-                stroke_color = st.color_picker("Color (Walls/Racks):", "#FF4B4B")
-            
-            # The actual drawing canvas
-            canvas_result = st_canvas(
-                fill_color="rgba(255, 75, 75, 0.3)",  
-                stroke_width=3,
-                stroke_color=stroke_color,
-                background_color="#2D2D44",          # <-- FIX 1: Lighter contrast color so you can see the edges
-                update_streamlit=True,
-                height=300,                          # <-- FIX 2: Reduced height
-                width=280,                           # <-- FIX 3: Reduced width to perfectly fit the sidebar
-                drawing_mode=drawing_mode,
-                key="floor_plan_canvas",
-            )
-            
-            if st.button("Save Floor Plan to Database", use_container_width=True):
-                if new_floor_name:
-                    if canvas_result.image_data is not None:
-                        # Convert the drawn canvas (NumPy array) into a standard PNG image
-                        img_array = canvas_result.image_data
-                        img_pil = Image.fromarray(img_array.astype('uint8'), 'RGBA')
-                        
-                        # Save the PIL image to a byte buffer
-                        buf = io.BytesIO()
-                        img_pil.save(buf, format="PNG")
-                        img_bytes = buf.getvalue()
-                        
-                        # Save to PostgreSQL
-                        run_query("INSERT INTO floor_plans (floor_name, image) VALUES (%s, %s) ON CONFLICT (floor_name) DO UPDATE SET image=%s", 
-                                  (new_floor_name, img_bytes, img_bytes))
-                        st.success(f"Successfully saved interactive blueprint for {new_floor_name}!")
-                    else:
-                        st.error("Canvas is empty. Please draw the layout first.")
-                else:
-                    st.error("Please provide a Room/Floor Name.")
-            
-            existing_maps = get_data("SELECT floor_name FROM floor_plans")
-            if not existing_maps.empty:
-                st.write("**Active Custom Maps:**", ", ".join(existing_maps['floor_name'].tolist()))
                 
     st.divider()
     if st.button("Logout", use_container_width=True):
@@ -357,12 +309,11 @@ if not st.session_state.low_stock_alerted:
     st.session_state.low_stock_alerted = True
 
 # --- MAIN DASHBOARD ---
-init_db()
-st.title("🔬 ECD Inventory Management")
+st.title("🔬 Lab Inventory Management")
 
-# Generate all 10 tabs for every user so the UI remains consistent
-tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "📜 History"
+# Generate all 11 tabs for every user so the UI remains consistent
+tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_floorplan, tab_history = st.tabs([
+    "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
 ])
 
 # 1. VIEW STOCK TAB
@@ -514,16 +465,12 @@ with tab_add:
             if uploaded_file is not None:
                 if st.button("Process Bulk Upload"):
                     try:
-                        # Parse the specific sheet, skipping the first 3 rows which contain titles/blank space
                         df_upload = pd.read_excel(uploaded_file, sheet_name='Electronics Inventory', skiprows=3)
-                        
-                        # Remove empty rows
                         df_upload = df_upload.dropna(subset=['Component'])
                         
                         success_count = 0
                         
                         # Find the current highest ELEC code so we don't overwrite anything
-                        # FIX: Pass the wildcard securely so psycopg2 doesn't confuse the % sign for a parameter
                         df_codes = get_data("SELECT item_code FROM inventory WHERE item_code LIKE %s", ('ELEC-%',))
                         if df_codes.empty:
                             next_num = 1
@@ -537,7 +484,6 @@ with tab_add:
                             type_val = str(row['Type']).strip() if pd.notna(row['Type']) else ""
                             spec_val = str(row['Value']).strip() if pd.notna(row['Value']) else ""
                             
-                            # Safely extract integers from stock fields that contain text (e.g., '300 Mtr', '0.426g')
                             raw_stock = row['Stock']
                             stock_qty = 0
                             extra_spec = ""
@@ -547,13 +493,11 @@ with tab_add:
                                 match = re.search(r'^(\d+)', stock_str)
                                 if match:
                                     stock_qty = int(match.group(1))
-                                # If the stock contains letters (like 'Mtr' or 'g'), save that information in the specs
                                 if not isinstance(raw_stock, (int, float)) and not stock_str.isdigit():
                                     extra_spec = f" [Raw Stock: {stock_str}]"
                                     
                             final_specs = f"{type_val} {spec_val}".strip() + extra_spec
                             
-                            # Format location data
                             rack_val = str(row['Rack']).strip() if pd.notna(row['Rack']) else ""
                             bin_val = str(row['Bin']).strip() if pd.notna(row['Bin']) else ""
                             comp_val = str(row['Compartment']).strip() if pd.notna(row['Compartment']) else ""
@@ -619,7 +563,7 @@ with tab_take:
                         new_qty = int(preview_data['quantity']) - take_qty
                         run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
                         
-                        # --- FIX: Cast Pandas/NumPy types to native Python floats/ints ---
+                        # Cast Pandas/NumPy types to native Python floats/ints
                         current_price = float(preview_data['unit_price']) if pd.notna(preview_data['unit_price']) else 0.0
                         total_out_value = float(take_qty * current_price)
                         
@@ -765,11 +709,59 @@ with tab_find:
     st.subheader("🔍 Find Component Location")
     search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
     
+    # Adjust these percentages based on where your racks actually are on your uploaded blueprints.
+    rack_coordinates = {
+        "RACK 1": {"x": 20, "y": 30},
+        "RACK 2": {"x": 20, "y": 70},
+        "RACK 3": {"x": 80, "y": 30},
+        "RACK 4": {"x": 80, "y": 70},
+        "DEFAULT": {"x": 50, "y": 50} 
+    }
+    
+    map_css = """
+    <style>
+    .map-container {
+        position: relative;
+        width: 100%;
+        max-width: 700px;
+        border: 2px solid #3B3B58;
+        border-radius: 8px;
+        overflow: hidden;
+        margin-top: 15px;
+        background-color: #1E1E2E;
+    }
+    .map-container img {
+        width: 100%;
+        height: auto;
+        display: block;
+        opacity: 0.75; 
+    }
+    .blinking-dot {
+        position: absolute;
+        width: 24px;
+        height: 24px;
+        background-color: #FF4B4B;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 0 15px 5px rgba(255, 75, 75, 0.6);
+        animation: pulse 1.2s infinite;
+        z-index: 10;
+    }
+    @keyframes pulse {
+        0% { transform: translate(-50%, -50%) scale(0.95); box-shadow: 0 0 0 0 rgba(255, 75, 75, 0.7); }
+        70% { transform: translate(-50%, -50%) scale(1.2); box-shadow: 0 0 0 15px rgba(255, 75, 75, 0); }
+        100% { transform: translate(-50%, -50%) scale(0.95); box-shadow: 0 0 0 0 rgba(255, 75, 75, 0); }
+    }
+    </style>
+    """
+    st.markdown(map_css, unsafe_allow_html=True)
+    
     if search_query:
         query_param = f"%{search_query}%"
         results_df = get_data('''SELECT item_code as "Code", name as "Component", 
                                  category as "Category", specs as "Specifications", 
                                  room_name || ' (' || room_no || ')' as "Room", 
+                                 room_name as "Base Room",
                                  rack_no as "Rack", quantity as "Qty", image 
                                  FROM inventory 
                                  WHERE name ILIKE %s OR item_code ILIKE %s OR specs ILIKE %s''', 
@@ -777,19 +769,50 @@ with tab_find:
         
         if not results_df.empty:
             st.success(f"Found {len(results_df)} matching item(s):")
+            
             for idx, row in results_df.iterrows():
                 with st.container(border=True):
-                    c1, c2 = st.columns([1, 4])
+                    c1, c2, c3 = st.columns([1, 2, 2])
+                    
                     with c1:
                         if row['image'] is not None:
                             st.image(bytes(row['image']), use_container_width=True)
                         else:
                             st.info("No Image")
+                            
                     with c2:
                         st.write(f"### {row['Component']} ({row['Code']})")
                         st.write(f"**Specs:** {row['Specifications']}")
                         st.write(f"**Location:** Room {row['Room']} | **Rack:** {row['Rack']}")
                         st.write(f"**Current Stock:** {row['Qty']} units")
+                        
+                    with c3:
+                        target_rack = str(row['Rack']).upper().split(" | ")[0]
+                        target_room = str(row['Base Room']).strip().title()
+                        
+                        coords = rack_coordinates.get(target_rack, rack_coordinates["DEFAULT"])
+                        
+                        # Fetch the specific floor plan from the DB
+                        floor_df = get_data("SELECT image FROM floor_plans WHERE floor_name=%s", (target_room,))
+                        
+                        if not floor_df.empty and floor_df.iloc[0]['image'] is not None:
+                            img_bytes = floor_df.iloc[0]['image']
+                            b64_encoded = base64.b64encode(img_bytes).decode()
+                            floor_plan_src = f"data:image/png;base64,{b64_encoded}"
+                        else:
+                            floor_plan_src = "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?q=80&w=800&auto=format&fit=crop"
+                        
+                        map_html = f"""
+                        <div class="map-container">
+                            <img src="{floor_plan_src}" alt="Lab Blueprint">
+                            <div class="blinking-dot" style="left: {coords['x']}%; top: {coords['y']}%;"></div>
+                        </div>
+                        """
+                        st.markdown(map_html, unsafe_allow_html=True)
+                        if not floor_df.empty:
+                            st.caption(f"📍 Mapped to: {target_room} -> {target_rack}")
+                        else:
+                            st.caption(f"⚠️ No blueprint uploaded for '{target_room}' yet.")
         else:
             st.warning("No items found matching your search.")
 
@@ -946,7 +969,6 @@ with tab_analytics:
         current_month_filter = current_date.strftime("%Y-%m")
         current_month_display = current_date.strftime("%B %Y")
         
-        # Financial Year Logic (April 1 to March 31)
         if current_date.month >= 4:
             fy_start_year = current_date.year
         else:
@@ -958,13 +980,11 @@ with tab_analytics:
 
         st.write("Track capital expenditure across all R&D projects for the current month and financial year.")
         
-        # 1. Fetch project costs specifically for the current month
         cost_df = get_data('''SELECT project as "Project", SUM(total_value) as "Total Cost (₹)" 
                               FROM transactions 
                               WHERE action='OUT' AND timestamp LIKE %s 
                               GROUP BY project''', (f"{current_month_filter}%",))
                               
-        # 2. Fetch the total expenditure for the current Financial Year
         fy_df = get_data('''SELECT SUM(total_value) as "FY_Total" 
                             FROM transactions 
                             WHERE action='OUT' AND timestamp >= %s AND timestamp < %s''', 
@@ -998,12 +1018,65 @@ with tab_analytics:
             st.info(f"No project expenditure data logged for {current_month_display} yet.")
             if fy_total > 0:
                 st.metric(f"Total Expenditure ({fy_display})", f"₹{fy_total:,.2f}")
-    
-    # If the user is NOT an admin, they see this instead:
     else:
         st.warning("🔒 **Access Denied:** Financial analytics and capital expenditure tracking are restricted to Admin accounts only.")
 
-# 10. HISTORY LOG TAB
+# 10. FLOOR PLANS TAB (ADMIN ONLY)
+with tab_floorplan:
+    st.subheader("🗺️ Interactive Floor Plan Creator")
+    
+    if st.session_state.current_role == 'admin':
+        st.write("Draw your lab layout. Use the tools to draw walls, place racks (rectangles), and add text. Click **Save** when finished.")
+        
+        new_floor_name = st.text_input("Room/Floor Name (e.g., 'ECD Lab', '2nd Floor')").strip().title()
+        
+        # Interactive Canvas Toolbar
+        col_tool1, col_tool2 = st.columns(2)
+        with col_tool1:
+            drawing_mode = st.selectbox("Tool:", ("rect", "line", "freedraw", "transform", "polygon"))
+        with col_tool2:
+            stroke_color = st.color_picker("Color (Walls/Racks):", "#FF4B4B")
+        
+        # Full-Screen drawing canvas
+        with st.container(border=True):
+            canvas_result = st_canvas(
+                fill_color="rgba(255, 75, 75, 0.3)", 
+                stroke_width=3,
+                stroke_color=stroke_color,
+                background_color="#2D2D44",          
+                update_streamlit=True,
+                height=600,
+                width=900,
+                drawing_mode=drawing_mode,
+                key="floor_plan_canvas_main",
+            )
+        
+        if st.button("Save Floor Plan to Database", use_container_width=True, type="primary"):
+            if new_floor_name:
+                if canvas_result.image_data is not None:
+                    img_array = canvas_result.image_data
+                    img_pil = Image.fromarray(img_array.astype('uint8'), 'RGBA')
+                    
+                    buf = io.BytesIO()
+                    img_pil.save(buf, format="PNG")
+                    img_bytes = buf.getvalue()
+                    
+                    run_query("INSERT INTO floor_plans (floor_name, image) VALUES (%s, %s) ON CONFLICT (floor_name) DO UPDATE SET image=%s", 
+                              (new_floor_name, img_bytes, img_bytes))
+                    st.success(f"Successfully saved interactive blueprint for {new_floor_name}!")
+                else:
+                    st.error("Canvas is empty. Please draw the layout first.")
+            else:
+                st.error("Please provide a Room/Floor Name.")
+        
+        existing_maps = get_data("SELECT floor_name FROM floor_plans")
+        if not existing_maps.empty:
+            st.write("**Active Custom Maps:**", ", ".join(existing_maps['floor_name'].tolist()))
+    
+    else:
+        st.warning("🔒 **Access Denied:** Floor plan management is restricted to Admin accounts only.")
+
+# 11. HISTORY LOG TAB
 with tab_history:
     st.subheader("Lab Activity Log")
     
