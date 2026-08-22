@@ -305,13 +305,13 @@ with st.sidebar:
             
             # The actual drawing canvas
             canvas_result = st_canvas(
-                fill_color="rgba(255, 75, 75, 0.3)",  # Slightly transparent fill for racks
+                fill_color="rgba(255, 75, 75, 0.3)",  
                 stroke_width=3,
                 stroke_color=stroke_color,
-                background_color="#1E1E2E",          # Matches the custom dark theme
+                background_color="#2D2D44",          # <-- FIX 1: Lighter contrast color so you can see the edges
                 update_streamlit=True,
-                height=350,
-                width=350,                           # Constrained width to fit within the sidebar cleanly
+                height=300,                          # <-- FIX 2: Reduced height
+                width=280,                           # <-- FIX 3: Reduced width to perfectly fit the sidebar
                 drawing_mode=drawing_mode,
                 key="floor_plan_canvas",
             )
