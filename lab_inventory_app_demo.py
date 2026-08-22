@@ -80,7 +80,7 @@ def init_db():
                  (id SERIAL PRIMARY KEY, timestamp TEXT, user_name TEXT, 
                   item_code TEXT, item_name TEXT, message TEXT)''')
                   
-    # 5. Add Pricing Columns (Safely updates existing tables)
+    # 5. Add Pricing Columns
     c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='inventory' AND column_name='unit_price'")
     if not c.fetchone():
         c.execute("ALTER TABLE inventory ADD COLUMN unit_price REAL DEFAULT 0.0")
@@ -89,6 +89,10 @@ def init_db():
     if not c.fetchone():
         c.execute("ALTER TABLE transactions ADD COLUMN unit_price REAL DEFAULT 0.0")
         c.execute("ALTER TABLE transactions ADD COLUMN total_value REAL DEFAULT 0.0")
+        
+    # 6. NEW: Floor Plans Table for the Interactive Canvas
+    c.execute('''CREATE TABLE IF NOT EXISTS floor_plans
+                 (floor_name TEXT PRIMARY KEY, image BYTEA)''')
     
     # Create the Master Admin account if the table is completely empty
     c.execute("SELECT COUNT(*) FROM users")
