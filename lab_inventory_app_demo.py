@@ -353,6 +353,7 @@ if not st.session_state.low_stock_alerted:
     st.session_state.low_stock_alerted = True
 
 # --- MAIN DASHBOARD ---
+init_db()
 st.title("🔬 ECD Inventory Management")
 
 # Generate all 10 tabs for every user so the UI remains consistent
