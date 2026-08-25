@@ -256,8 +256,8 @@ if not st.session_state.current_user:
             
             slides = [
                 {"img": "MembraneOxygenator.png", "cap": "Membrane Oxygenator"},
-                {"img": "Paracorporeal_Left_Ventricular_Assist_Device.jpg", "cap": "Paracorporeal LVAD"},
-                {"img": "veinViewer.jpg", "cap": "Chitra Vein Viewer"},
+                {"img": "Paracorporeal_Left_Ventricular_Assist_Device.png", "cap": "Paracorporeal LVAD"},
+                {"img": "veinViewer.png", "cap": "Chitra Vein Viewer"},
                 {"img": "BloodFlowMeter.png", "cap": "Blood Flow Meter"},
                 {"img": "infantwarmers.jpg", "cap": "Infant Warmers"}
             ]
