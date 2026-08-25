@@ -512,7 +512,35 @@ with tab_add:
                         
                     except Exception as e:
                         st.error(f"⚠️ Error processing the Excel file. Details: {e}")
-
+    # --- NEW: ADMIN BULK DELETE FEATURE ---
+        with st.expander("🗑️ Admin Bulk Delete (Revert Excel Upload)"):
+            st.warning("⚠️ **Danger Zone:** Uploading an Excel file here will **DELETE** all matching components (by name) from the Electronics database. Use this only to revert a mistaken upload.")
+            del_uploaded_file = st.file_uploader("Upload Excel Document to Reverse", type=['xlsx'], key="delete_upload")
+            
+            if del_uploaded_file is not None:
+                if st.button("Process Bulk Delete", type="primary"):
+                    try:
+                        df_del = pd.read_excel(del_uploaded_file, sheet_name='Electronics Inventory', skiprows=3)
+                        df_del = df_del.dropna(subset=['Component'])
+                        
+                        delete_count = 0
+                        
+                        for idx, row in df_del.iterrows():
+                            comp_name = str(row['Component']).strip().title()
+                            
+                            # Delete the item from the inventory table
+                            run_query("DELETE FROM inventory WHERE name=%s AND category='Electronics'", (comp_name,))
+                            
+                            # Clean up the transaction history so the deleted items don't clutter the logs
+                            run_query("DELETE FROM transactions WHERE item_name=%s AND action='IN'", (comp_name,))
+                            
+                            delete_count += 1
+                            
+                        st.success(f"🗑️ Successfully reverted and deleted {delete_count} electronics components from the database!")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"⚠️ Error processing the Excel file for deletion. Details: {e}")
 # 3. TAKE ITEMS TAB
 with tab_take:
     st.subheader("Check Out Items")
