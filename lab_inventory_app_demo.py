@@ -11,9 +11,6 @@ import hashlib
 import plotly.express as px
 import re
 import base64
-import requests
-from bs4 import BeautifulSoup
-import time
 
 # --- TIMEZONE SETUP ---
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -201,44 +198,72 @@ if not st.session_state.current_user:
                                           (new_user, hash_password(new_pass), new_dept))
                                 st.success(f"Access requested for the {new_dept} team! Please wait for Admin approval.")
                                 
+    # 3. SHOWCASE GALLERY (Slideshow)
     with showcase_col:
         st.markdown("### 💡 Engineered for Life")
         st.caption("Innovating next-generation medical devices.")
-        try:
-            def get_base64(file_path):
-                with open(file_path, "rb") as f:
-                    return base64.b64encode(f.read()).decode()
-            
-            slides = [
-                {"img": "MembraneOxygenator.png", "cap": "Membrane Oxygenator"},
-                {"img": "Paracorporeal_Left_Ventricular_Assist_Device.png", "cap": "Paracorporeal LVAD"},
-                {"img": "veinViewer.png", "cap": "Chitra Vein Viewer"},
-                {"img": "BloodFlowMeter.png", "cap": "Blood Flow Meter"},
-                {"img": "infantwarmers.jpg", "cap": "Infant Warmers"}
-            ]
-            
-            slides_html = ""
-            for i, slide in enumerate(slides):
-                b64_str = get_base64(slide["img"])
-                delay = i * 4 
-                slides_html += f'<div class="slide" style="animation-delay: {delay}s;"><img src="data:image/png;base64,{b64_str}"><div class="slide-cap">{slide["cap"]}</div></div>\n'
+        
+        # Helper function to compress images to prevent browser memory crashes
+        def get_compressed_base64(file_path):
+            try:
+                img = Image.open(file_path)
+                img.thumbnail((800, 800)) # Compress to max 800px
+                if img.mode in ("RGBA", "P"): 
+                    img = img.convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=80)
+                return base64.b64encode(buf.getvalue()).decode()
+            except Exception:
+                return None
+
+        slides = [
+            {"img": "MembraneOxygenator.png", "cap": "Membrane Oxygenator"},
+            {"img": "Paracorporeal_Left_Ventricular_Assist_Device.png", "cap": "Paracorporeal LVAD"},
+            {"img": "veinViewer.png", "cap": "Chitra Vein Viewer"},
+            {"img": "BloodFlowMeter.png", "cap": "Blood Flow Meter"},
+            {"img": "infantwarmers.jpg", "cap": "Infant Warmers"}
+        ]
+        
+        # 1. Safely check which images actually exist in the repo
+        valid_slides = []
+        for s in slides:
+            if os.path.exists(s["img"]):
+                valid_slides.append(s)
+            elif os.path.exists(f"images/{s['img']}"): 
+                s["img"] = f"images/{s['img']}"
+                valid_slides.append(s)
                 
+        # 2. Dynamically build the slideshow based ONLY on found images
+        if len(valid_slides) > 0:
+            slides_html = ""
+            duration = len(valid_slides) * 4 
+            
+            p_fadein = int((1 / duration) * 100)
+            p_visible = int((3.8 / duration) * 100)
+            p_fadeout = int((4.8 / duration) * 100)
+            
+            for i, slide in enumerate(valid_slides):
+                b64_str = get_compressed_base64(slide["img"])
+                if b64_str:
+                    delay = i * 4 
+                    slides_html += f'<div class="slide" style="-webkit-animation-delay: {delay}s; animation-delay: {delay}s;"><img src="data:image/jpeg;base64,{b64_str}"><div class="slide-cap">{slide["cap"]}</div></div>\n'
+            
             slideshow_css = f"""
 <style>
 .slider-container {{ position: relative; width: 100%; height: 420px; background-color: #1E1E2E; border: 1px solid #333; border-radius: 8px; overflow: hidden; box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.4); }}
-.slide {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; animation: crossfade 20s infinite; }}
+.slide {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; -webkit-animation: crossfade {duration}s infinite; animation: crossfade {duration}s infinite; }}
 .slide img {{ width: 100%; height: 100%; object-fit: contain; padding: 15px; padding-bottom: 50px; }}
-.slide-cap {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(14, 17, 23, 0.9); color: #FAFAFA; padding: 12px; text-align: center; font-size: 1.1rem; font-weight: 600; border-top: 2px solid #FF4B4B; }}
-@keyframes crossfade {{ 0% {{ opacity: 0; }} 5% {{ opacity: 1; }} 20% {{ opacity: 1; }} 25% {{ opacity: 0; }} 100% {{ opacity: 0; }} }}
+.slide-cap {{ position: absolute; bottom: 0; left: 0; right: 0; background: rgba(14, 17, 23, 0.9); color: #FAFAFA; padding: 12px; text-align: center; font-size: 1.1rem; font-weight: 600; border-top: 2px solid #FF4B4B; z-index: 10; }}
+@-webkit-keyframes crossfade {{ 0% {{ opacity: 0; }} {p_fadein}% {{ opacity: 1; }} {p_visible}% {{ opacity: 1; }} {p_fadeout}% {{ opacity: 0; }} 100% {{ opacity: 0; }} }}
+@keyframes crossfade {{ 0% {{ opacity: 0; }} {p_fadein}% {{ opacity: 1; }} {p_visible}% {{ opacity: 1; }} {p_fadeout}% {{ opacity: 0; }} 100% {{ opacity: 0; }} }}
 </style>
 <div class="slider-container">
 {slides_html}
 </div>
 """
             st.markdown(slideshow_css, unsafe_allow_html=True)
-            
-        except Exception as e:
-            st.warning("⚠️ Could not load images for the slideshow. Please ensure they are uploaded to your repository in the same folder as this script.")
+        else:
+            st.info("📷 Upload the 5 device images to the repository to activate the slideshow gallery.")
 
     st.stop()
 
@@ -326,7 +351,7 @@ with st.sidebar:
 # ==============================================================================
 # MAIN INVENTORY MANAGEMENT DASHBOARD
 # ==============================================================================
-st.title("🔬 ECD Inventory Management")
+st.title("🔬 Lab Inventory Management")
 
 tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_floorplan, tab_history = st.tabs([
     "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
@@ -398,7 +423,7 @@ with tab_add:
                 input_room_name = st.text_input("Room Name").strip().title()
             with loc3:
                 input_rack_no = st.text_input("Rack/Shelf Number").strip()
-                
+                    
             input_image = st.file_uploader("Upload Component Picture (Optional)", type=['png', 'jpg', 'jpeg'])
             selection = None
         else:
