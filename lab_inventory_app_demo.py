@@ -242,7 +242,7 @@ if not st.session_state.current_user:
             
         with img_col2:
             st.image("MembraneOxygenator.png", caption="Membrane Oxygenator", use_container_width=True)
-            st.image("infantwarmers.png", caption="Infant Warmers", use_container_width=True)
+            st.image("infantwarmers.jpg", caption="Infant Warmers", use_container_width=True)
 
     st.stop()
 
