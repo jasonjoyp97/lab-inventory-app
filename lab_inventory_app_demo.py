@@ -23,7 +23,7 @@ def hash_password(password):
 def verify_password(provided_password, stored_hash):
     """Checks if the provided password matches the database hash"""
     return hash_password(provided_password) == stored_hash
-F
+
 # --- DATABASE CONNECTION ENGINE ---
 def get_db_connection():
     try:
