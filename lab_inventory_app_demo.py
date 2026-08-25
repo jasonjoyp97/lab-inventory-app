@@ -350,32 +350,34 @@ with st.sidebar:
 st.title("🔬 ECD Inventory Management")
 
 tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_floorplan, tab_history = st.tabs([
-    "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
+    "📦 ", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
 ])
 
 # 1. VIEW STOCK TAB
 with tab_stock:
-    st.subheader("⚡ Electronics")
-    df_elec = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", 
-                          room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", 
-                          quantity as "Qty", unit_price as "Unit Price (₹)", (quantity * unit_price) as "Total Value (₹)",
-                          low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Electronics' ''')
-    if not df_elec.empty:
-        st.dataframe(df_elec, use_container_width=True, hide_index=True)
-    else:
-        st.info("No electronics in stock.")
-        
+    # --- Dynamic High-Level Metrics ---
+    m_col1, m_col2, m_col3 = st.columns(3)
+    total_items = get_data("SELECT SUM(quantity) FROM inventory").iloc[0, 0] or 0
+    total_value = get_data("SELECT SUM(quantity * unit_price) FROM inventory").iloc[0, 0] or 0.0
+    low_stock = get_data("SELECT COUNT(*) FROM inventory WHERE quantity <= low_stock_threshold").iloc[0, 0] or 0
+
+    m_col1.metric("📦 Total Components", int(total_items))
+    m_col2.metric("💰 Estimated Value", f"₹{float(total_value):,.2f}")
+    m_col3.metric("🚨 Low Stock Alerts", int(low_stock))
     st.divider()
+    
+    # --- Containerized Tables ---
+    with st.container(border=True):
+        st.subheader("⚡ Electronics")
+        df_elec = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", quantity as "Qty", unit_price as "Unit Price (₹)", (quantity * unit_price) as "Total Value (₹)", low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Electronics' ''')
+        if not df_elec.empty: st.dataframe(df_elec, use_container_width=True, hide_index=True)
+        else: st.info("No electronics in stock.")
         
-    st.subheader("⚙️ Mechanical")
-    df_mech = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", 
-                          room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", 
-                          quantity as "Qty", unit_price as "Unit Price (₹)", (quantity * unit_price) as "Total Value (₹)",
-                          low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Mechanical' ''')
-    if not df_mech.empty:
-        st.dataframe(df_mech, use_container_width=True, hide_index=True)
-    else:
-        st.info("No mechanical components in stock.")
+    with st.container(border=True):
+        st.subheader("⚙️ Mechanical")
+        df_mech = get_data('''SELECT item_code as "Code", name as "Component", specs as "Specifications", room_name || ' (' || room_no || ')' as "Room", rack_no as "Rack", quantity as "Qty", unit_price as "Unit Price (₹)", (quantity * unit_price) as "Total Value (₹)", low_stock_threshold as "Warning Lvl" FROM inventory WHERE category='Mechanical' ''')
+        if not df_mech.empty: st.dataframe(df_mech, use_container_width=True, hide_index=True)
+        else: st.info("No mechanical components in stock.")
 
 # 2. ADD/PURCHASE ITEMS TAB
 with tab_add:
