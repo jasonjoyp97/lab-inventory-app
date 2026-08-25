@@ -568,49 +568,52 @@ with tab_add:
 
 # 3. TAKE ITEMS TAB
 with tab_take:
-    st.subheader("Check Out Items")
-    take_category = st.radio("Which category?", ["Electronics", "Mechanical"], key="take_cat")
+    st.subheader("📤 Component Checkout")
+    take_category = st.radio("Select Category:", ["Electronics", "Mechanical"], key="take_cat", horizontal=True)
     available_items_df = get_data("SELECT item_code, name, specs, room_name, rack_no FROM inventory WHERE category=%s AND quantity > 0", (take_category,))
+    
     if available_items_df.empty:
         st.warning(f"No {take_category} items currently in stock.")
     else:
-        take_options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_name']} ({row['rack_no']})" for _, row in available_items_df.iterrows()]
-        take_selection = st.selectbox("Search by Code, Name, or Location (Type to search/scan):", take_options)
-        take_code = take_selection.split(" | ")[0]
-        preview_data = get_data("SELECT image, quantity, name, specs, unit_price FROM inventory WHERE item_code=%s", (take_code,)).iloc[0]
-        
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            if preview_data['image'] is not None:
-                st.image(bytes(preview_data['image']), caption="Reference Image", use_container_width=True)
-            else:
-                st.info("📷 No picture available for this item.")
-        with col2:
-            st.write(f"**Current Stock:** {preview_data['quantity']}")
-            st.write(f"**Specifications:** {preview_data['specs']}")
-            with st.form("take_form", clear_on_submit=True):
-                take_qty = st.number_input("Quantity Needed", min_value=1, max_value=int(preview_data['quantity']), step=1)
-                take_project = st.text_input("Project Name (Required, e.g., Organ Transport Prototype)")
-                take_submit = st.form_submit_button("Check Out")
+        with st.container(border=True):
+            take_options = [f"{row['item_code']} | {row['name']} | Loc: {row['room_name']} ({row['rack_no']})" for _, row in available_items_df.iterrows()]
+            take_selection = st.selectbox("Search by Code, Name, or Location:", take_options)
+            take_code = take_selection.split(" | ")[0]
+            preview_data = get_data("SELECT image, quantity, name, specs, unit_price FROM inventory WHERE item_code=%s", (take_code,)).iloc[0]
+            
+            st.divider()
+            
+            # --- Visual Hierarchy & Columns ---
+            col1, col2 = st.columns([1, 2], gap="large")
+            with col1:
+                if preview_data['image'] is not None:
+                    st.image(bytes(preview_data['image']), caption=f"{preview_data['name']}", use_container_width=True)
+                else:
+                    st.info("📷 No picture available.")
+            
+            with col2:
+                st.markdown(f"#### {preview_data['name']}")
+                st.caption(f"**Specs:** {preview_data['specs']}")
+                st.metric("Current Stock Available", int(preview_data['quantity']))
                 
-                if take_submit:
-                    if not take_project:
-                        st.error("Please specify a project.")
-                    else:
-                        new_qty = int(preview_data['quantity']) - take_qty
-                        run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
-                        current_price = float(preview_data['unit_price']) if pd.notna(preview_data['unit_price']) else 0.0
-                        total_out_value = float(take_qty * current_price)
-                        
-                        timestamp = datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S")
-                        run_query('''INSERT INTO transactions 
-                                     (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project, unit_price, total_value) 
-                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                                  (timestamp, st.session_state.current_user, take_category, take_code, 
-                                   str(preview_data['name']), str(preview_data['specs']), 
-                                   "OUT", int(take_qty), take_project, current_price, total_out_value))
-                        st.success(f"Checked out {take_qty} x {preview_data['name']}. Remaining: {new_qty}")
-                        st.rerun()
+                with st.form("take_form", clear_on_submit=True):
+                    col_q, col_p = st.columns(2)
+                    with col_q:
+                        take_qty = st.number_input("Quantity Needed", min_value=1, max_value=int(preview_data['quantity']), step=1)
+                    with col_p:
+                        take_project = st.text_input("Project Name (e.g., Organ Transport Prototype)")
+                    
+                    take_submit = st.form_submit_button("Confirm Checkout ➔", type="primary", use_container_width=True)
+                    
+                    if take_submit:
+                        if not take_project: st.error("Please specify a project.")
+                        else:
+                            new_qty = int(preview_data['quantity']) - take_qty
+                            current_price = float(preview_data['unit_price']) if pd.notna(preview_data['unit_price']) else 0.0
+                            run_query("UPDATE inventory SET quantity=%s WHERE item_code=%s", (new_qty, take_code))
+                            run_query('''INSERT INTO transactions (timestamp, user_name, category, item_code, item_name, specs, action, quantity, project, unit_price, total_value) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''', (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"), st.session_state.current_user, take_category, take_code, str(preview_data['name']), str(preview_data['specs']), "OUT", int(take_qty), take_project, current_price, float(take_qty * current_price)))
+                            st.success(f"✅ Checked out {take_qty} x {preview_data['name']}. Remaining: {new_qty}")
+                            st.rerun()
 
 # 4. BOM CHECKOUT TAB
 with tab_bom:
