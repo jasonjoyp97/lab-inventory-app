@@ -166,7 +166,7 @@ if "low_stock_alerted" not in st.session_state:
 if not st.session_state.current_user:
     
     # 1. AESTHETIC HERO HEADER
-    st.markdown("<h1 style='text-align: center; color: #FF4B4B; font-weight: 800; letter-spacing: 1.5px;'>🔬  Division of Extracorporeal Devices, SCTIMST </h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #FF4B4B; font-weight: 800; letter-spacing: 1.5px;'>🔬  SCTIMST ECD LAB </h1>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #A6A6A6; font-size: 18px; margin-bottom: 40px;'>Division of Extracorporeal Devices • Inventory & Prototyping Portal</p>", unsafe_allow_html=True)
     
     # 2. MAIN LAYOUT
