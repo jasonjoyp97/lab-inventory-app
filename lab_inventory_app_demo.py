@@ -164,85 +164,96 @@ if "low_stock_alerted" not in st.session_state:
 
 # --- LOGIN & REGISTRATION SYSTEM ---
 if not st.session_state.current_user:
-    st.title("🔬 Lab Inventory Portal")
-    st.divider()
     
-    # Split the screen: Login on the left, Showcase on the right
-    login_col, showcase_col = st.columns([1, 1.5], gap="large")
+    # 1. AESTHETIC HERO HEADER
+    st.markdown("<h1 style='text-align: center; color: #FF4B4B; font-weight: 800; letter-spacing: 1.5px;'>🔬 SCTIMST ECD LAB</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #A6A6A6; font-size: 18px; margin-bottom: 40px;'>Division of Extracorporeal Devices • Inventory & Prototyping Portal</p>", unsafe_allow_html=True)
+    
+    # 2. MAIN LAYOUT (Using a middle spacer column to prevent cramping)
+    login_col, spacer, showcase_col = st.columns([1.1, 0.1, 1.8])
     
     with login_col:
-        tab_login, tab_signup = st.tabs(["🔒 Login", "📝 Request Access"])
+        st.markdown("### 🔒 Secure Access")
+        st.caption("Authenticate to manage components and BOMs.")
         
-        with tab_login:
-            with st.form("login_form"):
-                username = st.text_input("Username").lower().strip()
-                password = st.text_input("Password", type="password")
-                submitted = st.form_submit_button("Login")
-                
-                if submitted:
-                    if not username or not password:
-                        st.error("Please enter both username and password.")
-                    else:
-                        user_df = get_data("SELECT password, role, status FROM users WHERE username = %s", (username,))
-                        if not user_df.empty:
-                            stored_hash = user_df.iloc[0]['password']
-                            status = user_df.iloc[0]['status']
-                            role = user_df.iloc[0]['role']
-                            
-                            if verify_password(password, stored_hash):
-                                if status == 'approved':
-                                    st.session_state.current_user = username
-                                    st.session_state.current_role = role
-                                    st.session_state.low_stock_alerted = False
-                                    st.rerun()
+        # Wrapped in a card to pop off the background
+        with st.container(border=True):
+            tab_login, tab_signup = st.tabs(["Login", "Request Access"])
+            
+            with tab_login:
+                st.write("") # Visual spacing
+                with st.form("login_form"):
+                    username = st.text_input("Username").lower().strip()
+                    password = st.text_input("Password", type="password")
+                    # Upgraded to a primary, full-width button
+                    submitted = st.form_submit_button("Authenticate ➔", type="primary", use_container_width=True)
+                    
+                    if submitted:
+                        if not username or not password:
+                            st.error("Please enter both username and password.")
+                        else:
+                            user_df = get_data("SELECT password, role, status FROM users WHERE username = %s", (username,))
+                            if not user_df.empty:
+                                stored_hash = user_df.iloc[0]['password']
+                                status = user_df.iloc[0]['status']
+                                role = user_df.iloc[0]['role']
+                                
+                                if verify_password(password, stored_hash):
+                                    if status == 'approved':
+                                        st.session_state.current_user = username
+                                        st.session_state.current_role = role
+                                        st.session_state.low_stock_alerted = False
+                                        st.rerun()
+                                    else:
+                                        st.warning("Your account is pending approval from the Admin.")
                                 else:
-                                    st.warning("Your account is pending approval from the Admin.")
+                                    st.error("Invalid username or password.")
                             else:
                                 st.error("Invalid username or password.")
+                                
+            with tab_signup:
+                st.write("") # Visual spacing
+                with st.form("signup_form", clear_on_submit=True):
+                    new_user = st.text_input("Desired Username").lower().strip()
+                    new_pass = st.text_input("Create Password", type="password")
+                    confirm_pass = st.text_input("Confirm Password", type="password")
+                    new_dept = st.radio("Select Department:", ["Mechanical", "Electronics"], horizontal=True)
+                    
+                    signup_submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if signup_submitted:
+                        if not new_user or not new_pass:
+                            st.error("All fields are required.")
+                        elif new_pass != confirm_pass:
+                            st.error("Passwords do not match.")
                         else:
-                            st.error("Invalid username or password.")
-                            
-        with tab_signup:
-            with st.form("signup_form", clear_on_submit=True):
-                st.write("Submit your details to the Admin for approval.")
-                new_user = st.text_input("Desired Username").lower().strip()
-                new_pass = st.text_input("Create Password", type="password")
-                confirm_pass = st.text_input("Confirm Password", type="password")
-                
-                new_dept = st.radio("Select Department:", ["Mechanical", "Electronics"], horizontal=True)
-                
-                signup_submitted = st.form_submit_button("Request Account")
-                
-                if signup_submitted:
-                    if not new_user or not new_pass:
-                        st.error("All fields are required.")
-                    elif new_pass != confirm_pass:
-                        st.error("Passwords do not match.")
-                    else:
-                        check_user = get_data("SELECT username FROM users WHERE username = %s", (new_user,))
-                        if not check_user.empty:
-                            st.error("Username already exists. Please choose another.")
-                        else:
-                            run_query("INSERT INTO users (username, password, role, status, department) VALUES (%s, %s, 'user', 'pending', %s)", 
-                                      (new_user, hash_password(new_pass), new_dept))
-                            st.success(f"Access requested for the {new_dept} team! Please wait for Admin approval.")
-                            
-    # --- NEW: ECD Device Showcase ---
+                            check_user = get_data("SELECT username FROM users WHERE username = %s", (new_user,))
+                            if not check_user.empty:
+                                st.error("Username already exists. Please choose another.")
+                            else:
+                                run_query("INSERT INTO users (username, password, role, status, department) VALUES (%s, %s, 'user', 'pending', %s)", 
+                                          (new_user, hash_password(new_pass), new_dept))
+                                st.success(f"Access requested for the {new_dept} team! Please wait for Admin approval.")
+                                
+    # 3. SHOWCASE GALLERY
     with showcase_col:
-        st.subheader("💡 Engineered for Life")
-        st.caption("Powering research and development for Extracorporeal Devices.")
+        st.markdown("### 💡 Engineered for Life")
+        st.caption("Innovating next-generation medical devices.")
         
-        # Create a beautiful masonry-style grid for the devices
-        img_col1, img_col2 = st.columns(2)
+        # Smart Grid: Matches the tall image with two short stacked images for a clean bottom edge.
+        show1, show2 = st.columns([1, 1.2], gap="small")
         
-        with img_col1:
-            st.image("Paracorporeal_Left_Ventricular_Assist_Device.png", caption="Paracorporeal LVAD", use_container_width=True)
-            st.image("veinViewer.png", caption="Chitra Vein Viewer", use_container_width=True)
-            st.image("BloodFlowMeter.png", caption="Blood Flow Meter", use_container_width=True)
-            
-        with img_col2:
-            st.image("MembraneOxygenator.png", caption="Membrane Oxygenator", use_container_width=True)
-            st.image("infantwarmers.jpg", caption="Infant Warmers", use_container_width=True)
+        with show1:
+            with st.container(border=True):
+                st.image("MembraneOxygenator.png", caption="Membrane Oxygenator", use_container_width=True)
+            with st.container(border=True):
+                st.image("BloodFlowMeter.png", caption="Blood Flow Meter", use_container_width=True)
+                
+        with show2:
+            with st.container(border=True):
+                st.image("Paracorporeal_Left_Ventricular_Assist_Device.jpg", caption="Paracorporeal LVAD", use_container_width=True)
+            with st.container(border=True):
+                st.image("veinViewer.jpg", caption="Chitra Vein Viewer", use_container_width=True)
 
     st.stop()
 
