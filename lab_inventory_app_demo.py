@@ -304,7 +304,7 @@ if not st.session_state.low_stock_alerted:
     st.session_state.low_stock_alerted = True
 
 # --- MAIN DASHBOARD ---
-st.title("🔬 Lab Inventory Management")
+st.title("🔬 ECD Inventory Management")
 
 tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_floorplan, tab_history = st.tabs([
     "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
