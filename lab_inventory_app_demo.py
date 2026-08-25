@@ -203,11 +203,10 @@ if not st.session_state.current_user:
         st.markdown("### 💡 Engineered for Life")
         st.caption("Innovating next-generation medical devices.")
         
-        # Helper function to compress images to prevent browser memory crashes
         def get_compressed_base64(file_path):
             try:
                 img = Image.open(file_path)
-                img.thumbnail((800, 800)) # Compress to max 800px
+                img.thumbnail((800, 800)) 
                 if img.mode in ("RGBA", "P"): 
                     img = img.convert("RGB")
                 buf = io.BytesIO()
@@ -224,7 +223,6 @@ if not st.session_state.current_user:
             {"img": "infantwarmers.jpg", "cap": "Infant Warmers"}
         ]
         
-        # 1. Safely check which images actually exist in the repo
         valid_slides = []
         for s in slides:
             if os.path.exists(s["img"]):
@@ -233,7 +231,6 @@ if not st.session_state.current_user:
                 s["img"] = f"images/{s['img']}"
                 valid_slides.append(s)
                 
-        # 2. Dynamically build the slideshow based ONLY on found images
         if len(valid_slides) > 0:
             slides_html = ""
             duration = len(valid_slides) * 4 
@@ -276,7 +273,6 @@ if not st.session_state.low_stock_alerted:
         st.toast(f"🚨 **Warning:** {low_stock_count} item(s) are currently running low on stock! Check the 'Low Stock' tab.", icon="⚠️")
     
     st.session_state.low_stock_alerted = True
-
 
 # --- SIDEBAR NAVIGATION & ADMIN PANEL ---
 with st.sidebar:
@@ -732,71 +728,27 @@ with tab_find:
     st.subheader("🔍 Find Component Location")
     search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
     
-    rack_coordinates = {
-        "BLOOD PUMPS LAB": {"x": 8, "y": 25},
-        "CARDIAC DEVICES LAB": {"x": 20, "y": 25},
-        "ESL": {"x": 31, "y": 25},
-        "IFVL": {"x": 42, "y": 25},
-        "CCF": {"x": 62, "y": 25},
-        "PROTOTYPING FACILITY": {"x": 82, "y": 25},
-        "POLISHING FACILITY": {"x": 93, "y": 25},
-        "SP": {"x": 7, "y": 75},
-        "SITTING PLACE": {"x": 20, "y": 75},
-        "CABIN": {"x": 33, "y": 75},
-        "DR": {"x": 44, "y": 75},
-        "TRC": {"x": 74, "y": 75},
-        "MPL STORE": {"x": 82, "y": 75},
-        "STORE": {"x": 89, "y": 75},
-        "DEFAULT": {"x": 50, "y": 50} 
-    }
-    
-    map_css = """
-    <style>
-    .map-container { position: relative; width: 100%; max-width: 700px; border: 2px solid #3B3B58; border-radius: 8px; overflow: hidden; margin-top: 15px; background-color: #1E1E2E; }
-    .map-container img { width: 100%; height: auto; display: block; opacity: 0.75; }
-    .blinking-dot { position: absolute; width: 24px; height: 24px; background-color: #FF4B4B; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px 5px rgba(255, 75, 75, 0.6); animation: pulse 1.2s infinite; z-index: 10; }
-    @keyframes pulse { 0% { transform: translate(-50%, -50%) scale(0.95); box-shadow: 0 0 0 0 rgba(255, 75, 75, 0.7); } 70% { transform: translate(-50%, -50%) scale(1.2); box-shadow: 0 0 0 15px rgba(255, 75, 75, 0); } 100% { transform: translate(-50%, -50%) scale(0.95); box-shadow: 0 0 0 0 rgba(255, 75, 75, 0); } }
-    </style>
-    """
-    st.markdown(map_css, unsafe_allow_html=True)
-    
     if search_query:
         query_param = f"%{search_query}%"
         results_df = get_data('''SELECT item_code as "Code", name as "Component", category as "Category", specs as "Specifications", room_name || ' (' || room_no || ')' as "Room", room_name as "Base Room", rack_no as "Rack", quantity as "Qty", image FROM inventory WHERE name ILIKE %s OR item_code ILIKE %s OR specs ILIKE %s''', (query_param, query_param, query_param))
+        
         if not results_df.empty:
             st.success(f"Found {len(results_df)} matching item(s):")
             for idx, row in results_df.iterrows():
                 with st.container(border=True):
-                    c1, c2, c3 = st.columns([1, 2, 2])
+                    c1, c2 = st.columns([1, 3])
+                    
                     with c1:
                         if row['image'] is not None:
                             st.image(bytes(row['image']), use_container_width=True)
                         else:
                             st.info("No Image")
+                            
                     with c2:
                         st.write(f"### {row['Component']} ({row['Code']})")
                         st.write(f"**Specs:** {row['Specifications']}")
                         st.write(f"**Location:** Room {row['Room']} | **Rack:** {row['Rack']}")
                         st.write(f"**Current Stock:** {row['Qty']} units")
-                    with c3:
-                        target_rack = str(row['Rack']).upper().split(" | ")[0]
-                        target_room = str(row['Base Room']).strip().title()
-                        coords = rack_coordinates.get(target_rack, rack_coordinates["DEFAULT"])
-                        floor_df = get_data("SELECT image FROM floor_plans WHERE floor_name=%s", (target_room,))
-                        
-                        if not floor_df.empty and floor_df.iloc[0]['image'] is not None:
-                            img_bytes = floor_df.iloc[0]['image']
-                            b64_encoded = base64.b64encode(img_bytes).decode()
-                            floor_plan_src = f"data:image/png;base64,{b64_encoded}"
-                        else:
-                            floor_plan_src = "https://images.unsplash.com/photo-1600566753190-17f0baa2a6c3?q=80&w=800&auto=format&fit=crop"
-                        
-                        map_html = f'<div class="map-container"><img src="{floor_plan_src}" alt="Lab Blueprint"><div class="blinking-dot" style="left: {coords["x"]}%; top: {coords["y"]}%;"></div></div>'
-                        st.markdown(map_html, unsafe_allow_html=True)
-                        if not floor_df.empty:
-                            st.caption(f"📍 Mapped to: {target_room} -> {target_rack}")
-                        else:
-                            st.caption(f"⚠️ No blueprint uploaded for '{target_room}' yet.")
         else:
             st.warning("No items found matching your search.")
 
