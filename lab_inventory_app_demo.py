@@ -162,18 +162,87 @@ if "current_role" not in st.session_state:
 if "low_stock_alerted" not in st.session_state:
     st.session_state.low_stock_alerted = False
 
-# 3. SHOWCASE GALLERY
+# --- LOGIN & REGISTRATION SYSTEM ---
+if not st.session_state.current_user:
+    
+    # 1. AESTHETIC HERO HEADER
+    st.markdown("<h1 style='text-align: center; color: #FF4B4B; font-weight: 800; letter-spacing: 1.5px;'>🔬 SCTIMST ECD LAB</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #A6A6A6; font-size: 18px; margin-bottom: 40px;'>Division of Extracorporeal Devices • Inventory & Prototyping Portal</p>", unsafe_allow_html=True)
+    
+    # 2. MAIN LAYOUT
+    login_col, spacer, showcase_col = st.columns([1.1, 0.1, 1.8])
+    
+    with login_col:
+        st.markdown("### 🔒 Secure Access")
+        st.caption("Authenticate to manage components and BOMs.")
+        
+        with st.container(border=True):
+            tab_login, tab_signup = st.tabs(["Login", "Request Access"])
+            
+            with tab_login:
+                st.write("") 
+                with st.form("login_form"):
+                    username = st.text_input("Username").lower().strip()
+                    password = st.text_input("Password", type="password")
+                    submitted = st.form_submit_button("Authenticate ➔", type="primary", use_container_width=True)
+                    
+                    if submitted:
+                        if not username or not password:
+                            st.error("Please enter both username and password.")
+                        else:
+                            user_df = get_data("SELECT password, role, status FROM users WHERE username = %s", (username,))
+                            if not user_df.empty:
+                                stored_hash = user_df.iloc[0]['password']
+                                status = user_df.iloc[0]['status']
+                                role = user_df.iloc[0]['role']
+                                
+                                if verify_password(password, stored_hash):
+                                    if status == 'approved':
+                                        st.session_state.current_user = username
+                                        st.session_state.current_role = role
+                                        st.session_state.low_stock_alerted = False
+                                        st.rerun()
+                                    else:
+                                        st.warning("Your account is pending approval from the Admin.")
+                                else:
+                                    st.error("Invalid username or password.")
+                            else:
+                                st.error("Invalid username or password.")
+                                
+            with tab_signup:
+                st.write("") 
+                with st.form("signup_form", clear_on_submit=True):
+                    new_user = st.text_input("Desired Username").lower().strip()
+                    new_pass = st.text_input("Create Password", type="password")
+                    confirm_pass = st.text_input("Confirm Password", type="password")
+                    new_dept = st.radio("Select Department:", ["Mechanical", "Electronics"], horizontal=True)
+                    
+                    signup_submitted = st.form_submit_button("Submit Request", use_container_width=True)
+                    
+                    if signup_submitted:
+                        if not new_user or not new_pass:
+                            st.error("All fields are required.")
+                        elif new_pass != confirm_pass:
+                            st.error("Passwords do not match.")
+                        else:
+                            check_user = get_data("SELECT username FROM users WHERE username = %s", (new_user,))
+                            if not check_user.empty:
+                                st.error("Username already exists. Please choose another.")
+                            else:
+                                run_query("INSERT INTO users (username, password, role, status, department) VALUES (%s, %s, 'user', 'pending', %s)", 
+                                          (new_user, hash_password(new_pass), new_dept))
+                                st.success(f"Access requested for the {new_dept} team! Please wait for Admin approval.")
+                                
+    # 3. SHOWCASE GALLERY (Slideshow)
     with showcase_col:
         st.markdown("### 💡 Engineered for Life")
         st.caption("Innovating next-generation medical devices.")
         
         try:
-            # Helper function to encode images so HTML/CSS can render them directly
             def get_base64(file_path):
                 with open(file_path, "rb") as f:
                     return base64.b64encode(f.read()).decode()
             
-            # The list of images and their captions
             slides = [
                 {"img": "MembraneOxygenator.png", "cap": "Membrane Oxygenator"},
                 {"img": "Paracorporeal_Left_Ventricular_Assist_Device.jpg", "cap": "Paracorporeal LVAD"},
@@ -185,7 +254,6 @@ if "low_stock_alerted" not in st.session_state:
             slides_html = ""
             for i, slide in enumerate(slides):
                 b64_str = get_base64(slide["img"])
-                # We apply a 4-second delay to each consecutive image to create the rotation
                 delay = i * 4 
                 slides_html += f'''
                 <div class="slide" style="animation-delay: {delay}s;">
@@ -194,7 +262,6 @@ if "low_stock_alerted" not in st.session_state:
                 </div>
                 '''
                 
-            # The CSS that powers the smooth cross-fade animation
             slideshow_css = f"""
             <style>
             .slider-container {{
@@ -212,15 +279,13 @@ if "low_stock_alerted" not in st.session_state:
                 top: 0; left: 0;
                 width: 100%; height: 100%;
                 opacity: 0;
-                /* Total cycle is 20s (5 images * 4s) */
                 animation: crossfade 20s infinite; 
             }}
             .slide img {{
                 width: 100%; height: 100%;
-                /* 'contain' ensures tall and wide images fit perfectly without stretching */
                 object-fit: contain; 
                 padding: 15px;
-                padding-bottom: 50px; /* Leaves room for the caption */
+                padding-bottom: 50px; 
             }}
             .slide-cap {{
                 position: absolute;
@@ -235,9 +300,9 @@ if "low_stock_alerted" not in st.session_state:
             }}
             @keyframes crossfade {{
                 0% {{ opacity: 0; }}
-                5% {{ opacity: 1; }}   /* Fades in */
-                20% {{ opacity: 1; }}  /* Stays visible */
-                25% {{ opacity: 0; }}  /* Fades out as the next one fades in */
+                5% {{ opacity: 1; }}   
+                20% {{ opacity: 1; }}  
+                25% {{ opacity: 0; }}  
                 100% {{ opacity: 0; }}
             }}
             </style>
@@ -246,11 +311,10 @@ if "low_stock_alerted" not in st.session_state:
             </div>
             """
             
-            # Inject the slideshow into the app
             st.markdown(slideshow_css, unsafe_allow_html=True)
             
         except Exception as e:
-            st.warning("⚠️ Could not load images for the slideshow. Please ensure they are uploaded to your repository.")
+            st.warning("⚠️ Could not load images for the slideshow. Please ensure they are uploaded to your repository in the same folder as this script.")
 
     st.stop()
 
@@ -335,7 +399,7 @@ if not st.session_state.low_stock_alerted:
     st.session_state.low_stock_alerted = True
 
 # --- MAIN DASHBOARD ---
-st.title("🔬 ECD Inventory Management")
+st.title("🔬 Lab Inventory Management")
 
 tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_floorplan, tab_history = st.tabs([
     "📦 View Stock", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
@@ -543,7 +607,8 @@ with tab_add:
                         
                     except Exception as e:
                         st.error(f"⚠️ Error processing the Excel file. Details: {e}")
-    # --- NEW: ADMIN BULK DELETE FEATURE ---
+                        
+        # --- ADMIN BULK DELETE FEATURE ---
         with st.expander("🗑️ Admin Bulk Delete (Revert Excel Upload)"):
             st.warning("⚠️ **Danger Zone:** Uploading an Excel file here will **DELETE** all matching components (by name) from the Electronics database. Use this only to revert a mistaken upload.")
             del_uploaded_file = st.file_uploader("Upload Excel Document to Reverse", type=['xlsx'], key="delete_upload")
@@ -559,10 +624,7 @@ with tab_add:
                         for idx, row in df_del.iterrows():
                             comp_name = str(row['Component']).strip().title()
                             
-                            # Delete the item from the inventory table
                             run_query("DELETE FROM inventory WHERE name=%s AND category='Electronics'", (comp_name,))
-                            
-                            # Clean up the transaction history so the deleted items don't clutter the logs
                             run_query("DELETE FROM transactions WHERE item_name=%s AND action='IN'", (comp_name,))
                             
                             delete_count += 1
@@ -572,6 +634,7 @@ with tab_add:
                         
                     except Exception as e:
                         st.error(f"⚠️ Error processing the Excel file for deletion. Details: {e}")
+
 # 3. TAKE ITEMS TAB
 with tab_take:
     st.subheader("Check Out Items")
@@ -757,18 +820,26 @@ with tab_find:
     search_query = st.text_input("Search by Name, Code, or Specifications (e.g., 'Arduino', '10uF', 'ELEC-003')").strip()
     
     # --- LAB COORDINATE MAPPING (X%, Y%) ---
+    # Custom mapped to 4TH FLOOR.png
     rack_coordinates = {
-        "BLOOD PUMPS LAB": {"x": 23, "y": 47},
-        "CARDIAC DEVICES LAB": {"x": 29, "y": 47},
-        "ESL": {"x": 35, "y": 47},
-        "IFVL": {"x": 40, "y": 47},
-        "CCF": {"x": 59, "y": 47},
-        "PROTOTYPING FACILITY": {"x": 70, "y": 47},
-        "POLISHING FACILITY": {"x": 76, "y": 47},
-        "MPL STORE": {"x": 69, "y": 56},
-        "STORE": {"x": 73, "y": 56},
-        "TRC": {"x": 64, "y": 56},
-        "CABIN": {"x": 52, "y": 56}, 
+        # Top Row
+        "BLOOD PUMPS LAB": {"x": 8, "y": 25},
+        "CARDIAC DEVICES LAB": {"x": 20, "y": 25},
+        "ESL": {"x": 31, "y": 25},
+        "IFVL": {"x": 42, "y": 25},
+        "CCF": {"x": 62, "y": 25},
+        "PROTOTYPING FACILITY": {"x": 82, "y": 25},
+        "POLISHING FACILITY": {"x": 93, "y": 25},
+        
+        # Bottom Row
+        "SP": {"x": 7, "y": 75},
+        "SITTING PLACE": {"x": 20, "y": 75},
+        "CABIN": {"x": 33, "y": 75},
+        "DR": {"x": 44, "y": 75},
+        "TRC": {"x": 74, "y": 75},
+        "MPL STORE": {"x": 82, "y": 75},
+        "STORE": {"x": 89, "y": 75},
+        
         "DEFAULT": {"x": 50, "y": 50} 
     }
     
