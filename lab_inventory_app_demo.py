@@ -238,7 +238,7 @@ if not st.session_state.current_user:
         with img_col1:
             st.image("Paracorporeal_Left_Ventricular_Assist_Device.png", caption="Paracorporeal LVAD", use_container_width=True)
             st.image("veinViewer.png", caption="Chitra Vein Viewer", use_container_width=True)
-            st.image("BloodFlowMetepr.png", caption="Blood Flow Meter", use_container_width=True)
+            st.image("BloodFlowMeter.png", caption="Blood Flow Meter", use_container_width=True)
             
         with img_col2:
             st.image("MembraneOxygenator.png", caption="Membrane Oxygenator", use_container_width=True)
