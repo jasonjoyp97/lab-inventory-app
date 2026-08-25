@@ -245,71 +245,67 @@ if not st.session_state.current_user:
             
             slides = [
                 {"img": "MembraneOxygenator.png", "cap": "Membrane Oxygenator"},
-                {"img": "Paracorporeal_Left_Ventricular_Assist_Device.png", "cap": "Paracorporeal LVAD"},
-                {"img": "veinViewer.png", "cap": "Chitra Vein Viewer"},
+                {"img": "Paracorporeal_Left_Ventricular_Assist_Device.jpg", "cap": "Paracorporeal LVAD"},
+                {"img": "veinViewer.jpg", "cap": "Chitra Vein Viewer"},
                 {"img": "BloodFlowMeter.png", "cap": "Blood Flow Meter"},
                 {"img": "infantwarmers.jpg", "cap": "Infant Warmers"}
             ]
             
+            # NO LEADING SPACES: Prevents Streamlit from rendering this as a code block
             slides_html = ""
             for i, slide in enumerate(slides):
                 b64_str = get_base64(slide["img"])
                 delay = i * 4 
-                slides_html += f'''
-                <div class="slide" style="animation-delay: {delay}s;">
-                    <img src="data:image/png;base64,{b64_str}">
-                    <div class="slide-cap">{slide["cap"]}</div>
-                </div>
-                '''
+                slides_html += f'<div class="slide" style="animation-delay: {delay}s;"><img src="data:image/png;base64,{b64_str}"><div class="slide-cap">{slide["cap"]}</div></div>\n'
                 
             slideshow_css = f"""
-            <style>
-            .slider-container {{
-                position: relative;
-                width: 100%;
-                height: 420px;
-                background-color: #1E1E2E; 
-                border: 1px solid #333;
-                border-radius: 8px;
-                overflow: hidden;
-                box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.4);
-            }}
-            .slide {{
-                position: absolute;
-                top: 0; left: 0;
-                width: 100%; height: 100%;
-                opacity: 0;
-                animation: crossfade 20s infinite; 
-            }}
-            .slide img {{
-                width: 100%; height: 100%;
-                object-fit: contain; 
-                padding: 15px;
-                padding-bottom: 50px; 
-            }}
-            .slide-cap {{
-                position: absolute;
-                bottom: 0; left: 0; right: 0;
-                background: rgba(14, 17, 23, 0.9); 
-                color: #FAFAFA;
-                padding: 12px;
-                text-align: center;
-                font-size: 1.1rem;
-                font-weight: 600;
-                border-top: 2px solid #FF4B4B; 
-            }}
-            @keyframes crossfade {{
-                0% {{ opacity: 0; }}
-                5% {{ opacity: 1; }}   
-                20% {{ opacity: 1; }}  
-                25% {{ opacity: 0; }}  
-                100% {{ opacity: 0; }}
-            }}
-            </style>
-            <div class="slider-container">
-                {slides_html}
-            </div>
-            """
+<style>
+.slider-container {{
+    position: relative;
+    width: 100%;
+    height: 420px;
+    background-color: #1E1E2E; 
+    border: 1px solid #333;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.4);
+}}
+.slide {{
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    opacity: 0;
+    animation: crossfade 20s infinite; 
+}}
+.slide img {{
+    width: 100%; height: 100%;
+    object-fit: contain; 
+    padding: 15px;
+    padding-bottom: 50px; 
+}}
+.slide-cap {{
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(14, 17, 23, 0.9); 
+    color: #FAFAFA;
+    padding: 12px;
+    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 600;
+    border-top: 2px solid #FF4B4B; 
+}}
+@keyframes crossfade {{
+    0% {{ opacity: 0; }}
+    5% {{ opacity: 1; }}   
+    20% {{ opacity: 1; }}  
+    25% {{ opacity: 0; }}  
+    100% {{ opacity: 0; }}
+}}
+</style>
+<div class="slider-container">
+{slides_html}
+</div>
+"""
             
             st.markdown(slideshow_css, unsafe_allow_html=True)
             
