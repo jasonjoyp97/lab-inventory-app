@@ -109,12 +109,49 @@ def set_custom_aesthetic():
     st.markdown(
         """
         <style>
-        .stApp { background-color: #0E1117; color: #FAFAFA; }
-        [data-testid="stSidebar"] { background-color: #262730 !important; }
-        .stTabs [data-baseweb="tab-list"] { gap: 4px; background-color: transparent; }
-        .stTabs [data-baseweb="tab"] { background-color: #1E1E2E; border-radius: 6px 6px 0px 0px; padding: 10px 16px; color: #A6A6A6; border: 1px solid #333; border-bottom: none; }
-        .stTabs [data-baseweb="tab"]:hover { color: #FFFFFF; background-color: #2D2D44; }
-        .stTabs [aria-selected="true"] { background-color: #3B3B58 !important; color: #FFFFFF !important; border-bottom: 3px solid #FF4B4B !important; font-weight: 600; }
+        /* --- IMPORT PROFESSIONAL GOOGLE FONT --- */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        /* Force all Streamlit text elements to use the new font */
+        html, body, [class*="css"], [class*="st-"] {
+            font-family: 'Inter', sans-serif !important;
+        }
+
+        /* Main background */
+        .stApp {
+            background-color: #0E1117;
+            color: #FAFAFA;
+        }
+        /* Sidebar styling */
+        [data-testid="stSidebar"] {
+            background-color: #262730 !important;
+        }
+        /* Tab list container */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 4px;
+            background-color: transparent;
+        }
+        /* Inactive Tab Styling */
+        .stTabs [data-baseweb="tab"] {
+            background-color: #1E1E2E;
+            border-radius: 6px 6px 0px 0px;
+            padding: 10px 16px;
+            color: #A6A6A6;
+            border: 1px solid #333;
+            border-bottom: none;
+        }
+        /* Hover effect */
+        .stTabs [data-baseweb="tab"]:hover {
+            color: #FFFFFF;
+            background-color: #2D2D44;
+        }
+        /* Active Tab Styling */
+        .stTabs [aria-selected="true"] {
+            background-color: #3B3B58 !important;
+            color: #FFFFFF !important;
+            border-bottom: 3px solid #FF4B4B !important;
+            font-weight: 600;
+        }
         </style>
         """,
         unsafe_allow_html=True
