@@ -361,7 +361,7 @@ with st.sidebar:
 # ==============================================================================
 # MAIN INVENTORY MANAGEMENT DASHBOARD
 # ==============================================================================
-st.title("🔬 ECD Inventory Management")
+st.title("ECD Inventory Management")
 
 tab_stock, tab_add, tab_take, tab_bom, tab_edit, tab_find, tab_qr, tab_warning, tab_analytics, tab_floorplan, tab_history = st.tabs([
     "📦 Stock ", "📥 Add Items", "📤 Check Out", "🛒 BOM Upload", "✏️ Edit Items", "🔍 Find", "🖨️ Labels", "⚠️ Low Stock", "📊 Analytics", "🗺️ Floor Plans", "📜 History"
