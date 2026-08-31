@@ -112,9 +112,18 @@ def set_custom_aesthetic():
         /* --- IMPORT PROFESSIONAL GOOGLE FONT --- */
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-        /* Force all Streamlit text elements to use the new font */
+        /* Force all standard Streamlit elements to use the new font */
         html, body, [class*="css"], [class*="st-"] {
-            font-family: 'Inter', sans-serif !important;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* --- FIX: PROTECT STREAMLIT ICONS --- */
+        /* Prevents the Inter font from breaking Material Symbol ligatures */
+        .material-symbols-rounded, 
+        .material-symbols-outlined, 
+        .material-icons,
+        [data-testid="stIconMaterial"] {
+            font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
         }
 
         /* Main background */
