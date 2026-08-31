@@ -829,39 +829,85 @@ with tab_qr:
 
 # 8. LOW STOCK WARNING TAB
 with tab_warning:
-    st.subheader("⚠️ Low Stock Alerts")
-    df_warning = get_data('''SELECT item_code as "Code", name as "Component", category as "Category", quantity as "Current Qty", low_stock_threshold as "Warning Level", room_name || ' (' || rack_no || ')' as "Location" FROM inventory WHERE quantity <= low_stock_threshold ORDER BY category, name''')
+    st.subheader("⚠️ Low Stock Alerts (Priority Sorted)")
+    st.write("Components running low, automatically sorted by historical checkout demand to help prioritize procurement.")
+    
+    # --- DEMAND-PRIORITIZED SQL QUERY ---
+    df_warning = get_data('''
+        SELECT 
+            i.item_code as "Code", 
+            i.name as "Component", 
+            i.category as "Category", 
+            i.quantity as "Current Qty", 
+            i.low_stock_threshold as "Warning Level", 
+            COALESCE(t.demand, 0) as "Checkout Demand",
+            i.room_name || ' (' || i.rack_no || ')' as "Location" 
+        FROM inventory i
+        LEFT JOIN (
+            SELECT item_code, SUM(quantity) as demand 
+            FROM transactions 
+            WHERE action='OUT' 
+            GROUP BY item_code
+        ) t ON i.item_code = t.item_code
+        WHERE i.quantity <= i.low_stock_threshold 
+        ORDER BY "Checkout Demand" DESC, i.category, i.name
+    ''')
+    
     if not df_warning.empty:
-        st.error(f"Attention: {len(df_warning)} item(s) are running low and need to be reordered.")
-        st.dataframe(df_warning, use_container_width=True, hide_index=True)
-        st.download_button("📄 Download Reorder List (CSV)", data=df_warning.to_csv(index=False).encode('utf-8'), file_name=f"Low_Stock_List_{datetime.now(IST).strftime('%Y-%m-%d')}.csv", mime="text/csv")
+        with st.container(border=True):
+            st.error(f"Attention: {len(df_warning)} item(s) are running low and need to be reordered.")
+            st.dataframe(df_warning, use_container_width=True, hide_index=True)
+            
+            csv_data = df_warning.to_csv(index=False).encode('utf-8')
+            
+            st.download_button(
+                label="📄 Download Priority Reorder List (CSV)",
+                data=csv_data,
+                file_name=f"Priority_Reorder_List_{datetime.now(IST).strftime('%Y-%m-%d')}.csv",
+                mime="text/csv",
+                type="primary"
+            )
     else:
-        st.success("✅ All items are sufficiently stocked! No warnings to display.")
+        with st.container(border=True):
+            st.success("✅ All items are sufficiently stocked! No warnings to display.")
 
     st.divider()
+
     st.subheader("💬 Restock Coordination")
-    col_chat, col_form = st.columns([1.5, 1])
+    st.write("Leave notes for your lab mates about reordering low stock components.")
+    
+    col_chat, col_form = st.columns([1.5, 1], gap="large")
+    
     with col_chat:
+        st.write("**Recent Notes:**")
         notes_df = get_data("SELECT timestamp, user_name, item_name, message FROM restock_notes ORDER BY id DESC LIMIT 20")
+        
         if not notes_df.empty:
             for _, row in notes_df.iterrows():
-                st.info(f"👤 **{row['user_name'].title()}** ({row['timestamp']})\n\n📦 **{row['item_name']}:** {row['message']}")
+                with st.container(border=True):
+                    st.info(f"👤 **{row['user_name'].title()}** ({row['timestamp']})\n\n📦 **{row['item_name']}:** {row['message']}")
         else:
             st.write("No notes have been posted yet.")
             
     with col_form:
         if not df_warning.empty:
-            with st.form("add_note_form", clear_on_submit=True):
-                note_options = [f"{row['Code']} | {row['Component']}" for _, row in df_warning.iterrows()]
-                selected_note_item = st.selectbox("Select Low Component", note_options)
-                note_msg = st.text_input("Message (e.g., 'Will order on GeM tomorrow')")
-                if st.form_submit_button("Post Note"):
-                    if note_msg.strip() == "":
-                        st.error("Message cannot be empty.")
-                    else:
-                        run_query("INSERT INTO restock_notes (timestamp, user_name, item_code, item_name, message) VALUES (%s, %s, %s, %s, %s)", 
-                                  (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"), st.session_state.current_user, selected_note_item.split(" | ")[0], selected_note_item.split(" | ")[1], note_msg))
-                        st.rerun()
+            with st.container(border=True):
+                with st.form("add_note_form", clear_on_submit=True):
+                    st.write("**Add a Note**")
+                    note_options = [f"{row['Code']} | {row['Component']}" for _, row in df_warning.iterrows()]
+                    selected_note_item = st.selectbox("Select Low Component", note_options)
+                    note_msg = st.text_input("Message (e.g., 'Will order on GeM tomorrow')")
+                    submit_note = st.form_submit_button("Post Note", use_container_width=True)
+                    
+                    if submit_note:
+                        if note_msg.strip() == "":
+                            st.error("Message cannot be empty.")
+                        else:
+                            run_query("INSERT INTO restock_notes (timestamp, user_name, item_code, item_name, message) VALUES (%s, %s, %s, %s, %s)", 
+                                      (datetime.now(IST).strftime("%Y-%m-%d %H:%M:%S"), st.session_state.current_user, selected_note_item.split(" | ")[0], selected_note_item.split(" | ")[1], note_msg))
+                            st.rerun()
+        else:
+            st.info("Stock levels are healthy. No items require coordination.")
 
 # 9. ANALYTICS TAB
 with tab_analytics:
