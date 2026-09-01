@@ -260,7 +260,7 @@ if not st.session_state.current_user:
                                 
     # 3. SHOWCASE GALLERY (Slideshow)
     with showcase_col:
-        st.markdown("### 💡 Engineered for Life")
+        st.markdown("### Bringing life to innovation")
         st.caption("Innovating next-generation medical devices.")
         
         def get_compressed_base64(file_path):
