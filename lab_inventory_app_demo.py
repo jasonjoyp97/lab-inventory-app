@@ -958,32 +958,58 @@ with tab_warning:
 # 9. ANALYTICS TAB
 with tab_analytics:
     st.subheader("📊 Financial Analytics & Cost Tracking")
+    
     if st.session_state.current_role == 'admin':
-        current_date = datetime.now(IST)
-        current_month_filter = current_date.strftime("%Y-%m")
-        fy_start_year = current_date.year if current_date.month >= 4 else current_date.year - 1
+        st.write("Track capital expenditure across all R&D projects for a specific month and financial year.")
+        
+        # --- Dynamically fetch available months from transaction history ---
+        month_data = get_data("SELECT DISTINCT SUBSTR(timestamp, 1, 7) as month_val FROM transactions WHERE action='OUT' ORDER BY month_val DESC")
+        
+        if month_data.empty:
+            available_months = [datetime.now(IST).strftime("%Y-%m")]
+        else:
+            available_months = month_data['month_val'].tolist()
+            
+        # Create a user-friendly mapping (e.g., '2024-05' -> 'May 2024')
+        display_months = [datetime.strptime(m, "%Y-%m").strftime("%B %Y") for m in available_months]
+        month_map = dict(zip(display_months, available_months))
+        
+        # --- UI: Month Selector ---
+        col_filter, _ = st.columns([1, 3])
+        with col_filter:
+            selected_display_month = st.selectbox("📅 Select Month to Analyze:", display_months)
+            
+        selected_month_filter = month_map[selected_display_month]
+        
+        # Calculate Financial Year dynamically based on the selected month
+        sel_date = datetime.strptime(selected_month_filter, "%Y-%m")
+        fy_start_year = sel_date.year if sel_date.month >= 4 else sel_date.year - 1
         fy_start_str, fy_end_str = f"{fy_start_year}-04-01 00:00:00", f"{fy_start_year + 1}-04-01 00:00:00"
         fy_display = f"FY {fy_start_year}-{str(fy_start_year + 1)[-2:]}"
 
-        cost_df = get_data('''SELECT project as "Project", SUM(total_value) as "Total Cost (₹)" FROM transactions WHERE action='OUT' AND timestamp LIKE %s GROUP BY project''', (f"{current_month_filter}%",))
+        cost_df = get_data('''SELECT project as "Project", SUM(total_value) as "Total Cost (₹)" FROM transactions WHERE action='OUT' AND timestamp LIKE %s GROUP BY project''', (f"{selected_month_filter}%",))
         fy_df = get_data('''SELECT SUM(total_value) as "FY_Total" FROM transactions WHERE action='OUT' AND timestamp >= %s AND timestamp < %s''', (fy_start_str, fy_end_str))
         fy_total = fy_df.iloc[0]["FY_Total"] if not fy_df.empty and pd.notna(fy_df.iloc[0]["FY_Total"]) else 0.0
+        
+        st.divider()
         
         if not cost_df.empty: 
             cost_df = cost_df[cost_df["Project"] != ""]
             col1, col2 = st.columns([2, 1])
             with col1:
                 if cost_df["Total Cost (₹)"].sum() > 0:
-                    fig = px.pie(cost_df, values='Total Cost (₹)', names='Project', title=f'Capital Expenditure ({current_date.strftime("%B %Y")})', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
+                    fig = px.pie(cost_df, values='Total Cost (₹)', names='Project', title=f'Capital Expenditure ({selected_display_month})', hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
                     fig.update_layout(plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)", font_color="#f8fafc")
                     st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("📈 The visual pie chart will appear here once items with a Unit Price greater than ₹0 are checked out this month.")
             with col2:
                 st.write("**Monthly Cost Breakdown**")
                 st.dataframe(cost_df, hide_index=True, use_container_width=True)
-                st.metric(f"Total Expenditure ({current_date.strftime('%B %Y')})", f"₹{cost_df['Total Cost (₹)'].sum():,.2f}")
+                st.metric(f"Total Expenditure ({selected_display_month})", f"₹{cost_df['Total Cost (₹)'].sum():,.2f}")
                 st.metric(f"Total Expenditure ({fy_display})", f"₹{fy_total:,.2f}")
         else:
-            st.info(f"No project expenditure data logged for {current_date.strftime('%B %Y')} yet.")
+            st.info(f"No project expenditure data logged for {selected_display_month} yet.")
             if fy_total > 0: st.metric(f"Total Expenditure ({fy_display})", f"₹{fy_total:,.2f}")
     else:
         st.warning("🔒 **Access Denied:** Financial analytics and capital expenditure tracking are restricted to Admin accounts only.")
